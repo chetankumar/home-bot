@@ -1,0 +1,57 @@
+{% extends "finance_base.html" %}
+{% block content %}
+<h1>Categories</h1>
+{{ ui.flash(error, "bad") }}
+{% if msg %}{{ ui.flash(msg, "good") }}{% endif %}
+<p class="muted">Categories are yours to shape. Describe a spend on the Transactions page and the local model files it, or proposes a new category for you to confirm.
+  Each description is shown to the model, so wording it well teaches it what belongs where.</p>
+
+{% call ui.card("Add a category") %}
+<form method="post" action="{{ app_url('/categories') }}" class="row">
+  <label>Name <input name="name" required maxlength="40" placeholder="Pets"></label>
+  <label>What belongs here <input name="description" maxlength="200" size="40" placeholder="Vet, pet food, grooming"></label>
+  <label class="row"><input type="checkbox" name="counts_as_spend" value="1" checked> counts as spending</label>
+  <button>Add</button>
+</form>
+{% endcall %}
+
+{% call ui.card("Your categories") %}
+<table>
+  <thead><tr><th>Category</th><th class="num">Used</th><th>Merge into</th><th></th></tr></thead>
+  <tbody>
+  {% for c in rows %}
+  <tr>
+    <td>
+      <form method="post" action="{{ app_url('/categories/' ~ c.id) }}" class="row">
+        <input name="name" value="{{ c.name }}" required maxlength="40" size="14" aria-label="Name">
+        <input name="description" value="{{ c.description or '' }}" maxlength="200" size="34" placeholder="What belongs here" aria-label="Description">
+        <label class="row"><input type="checkbox" name="counts_as_spend" value="1" {{ "checked" if c.counts_as_spend }}> spending</label>
+        <button class="small secondary">Save</button>
+        {% if c.created_by == "ai" %}{{ ui.badge("AI-proposed", "info") }}{% elif c.created_by == "user" %}{{ ui.badge("yours") }}{% endif %}
+      </form>
+    </td>
+    <td class="num">{{ c.n }} <span class="muted">· {{ c.total | inr(false) }}</span></td>
+    <td>
+      <form method="post" action="{{ app_url('/categories/' ~ c.id ~ '/merge') }}" class="row">
+        <select name="target_id" aria-label="Merge into" required>
+          <option value="">…</option>
+          {% for o in rows if o.id != c.id %}<option value="{{ o.id }}">{{ o.name }}</option>{% endfor %}
+        </select>
+        <button class="small secondary">Merge</button>
+      </form>
+    </td>
+    <td>
+      <form method="post" action="{{ app_url('/categories/' ~ c.id ~ '/delete') }}"
+            onsubmit="return confirm('Delete {{ c.name | e }}? Its {{ c.n }} transaction(s) become uncategorised.')">
+        <button class="small secondary">Delete</button>
+      </form>
+    </td>
+  </tr>
+  {% else %}
+  <tr><td colspan="4" class="muted">No categories yet.</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+<p class="muted">Merging moves every transaction and recipient into the other category and removes this one. Unticking "spending" keeps a category out of burn-rate totals (use it for card-bill payments and moving your own money).</p>
+{% endcall %}
+{% endblock %}

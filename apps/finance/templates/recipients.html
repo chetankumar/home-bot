@@ -5,10 +5,10 @@
 <datalist id="recipient-names">{% for r in known %}<option value="{{ r.name }}">{% endfor %}</datalist>
 
 {% call ui.card("Who is this?") %}
-<p class="muted">Unknown counterparties, biggest spend first. Naming one tags all its past transactions and every future one. Reuse an existing name to give that recipient another UPI id or merchant name.</p>
+<p class="muted">Unknown counterparties, biggest spend first. Name one and describe what you buy from them: the local model picks the category, or proposes a new one for you to confirm. Naming tags all past and future transactions with that id. Reuse an existing name to add another UPI id or merchant name to that recipient.</p>
 {% if queue %}
 <table>
-  <thead><tr><th>Counterparty</th><th class="num">Spent</th><th>Name it</th></tr></thead>
+  <thead><tr><th>Counterparty</th><th class="num">Spent</th><th>Name them, and say what you buy</th></tr></thead>
   <tbody>
   {% for q in queue %}
   <tr>
@@ -17,25 +17,7 @@
       <div class="muted">{{ ui.badge(q.kind) }} <code>{{ q.key }}</code> · {{ q.n }}× · last {{ q.last_seen[:10] }}</div>
     </td>
     <td class="num">{{ q.total | inr(false) }}</td>
-    <td>
-      <form method="post" action="{{ app_url('/recipients') }}" class="row">
-        <input type="hidden" name="key" value="{{ q.key }}">
-        <input type="hidden" name="kind" value="{{ q.kind }}">
-        <input name="name" placeholder="Name" list="recipient-names" required size="14">
-        <span id="cat-{{ loop.index }}" class="row">
-          <select name="category_id" aria-label="Category">
-            <option value="">—</option>
-            {% for c in categories %}<option value="{{ c.id }}">{{ c.name }}</option>{% endfor %}
-          </select>
-          {% if ai_ready and q.kind == "merchant" %}
-          <button type="button" class="small secondary" hx-post="{{ app_url('/recipients/suggest') }}"
-                  hx-vals='{"key": {{ q.key | tojson }}, "raw": {{ (q.raw or "") | tojson }}}'
-                  hx-target="#cat-{{ loop.index }}" hx-swap="innerHTML">Suggest</button>
-          {% endif %}
-        </span>
-        <button class="small">Save</button>
-      </form>
-    </td>
+    <td>{% include "_queue_form.html" %}</td>
   </tr>
   {% endfor %}
   </tbody>
