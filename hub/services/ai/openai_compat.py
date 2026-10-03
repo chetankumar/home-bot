@@ -1,7 +1,7 @@
-"""OpenAI-compatible adapter: OpenAI, OpenRouter, Ollama, or any base_url.
+"""OpenAI-compatible adapter: OpenAI, OpenRouter, LM Studio, Ollama, or any base_url.
 
 Structured output uses the JSON-schema response_format, which OpenAI,
-OpenRouter (for models that support it) and Ollama (>= 0.5) all accept.
+OpenRouter (for models that support it), LM Studio and Ollama (>= 0.5) all accept.
 """
 
 from __future__ import annotations

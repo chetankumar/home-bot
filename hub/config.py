@@ -22,7 +22,7 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 class Settings(BaseSettings):
     """Secrets and deployment knobs. Read from the environment, then .env."""
 
-    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
     hub_password: str = ""
     hub_secret_key: str = ""
@@ -91,11 +91,11 @@ class Config:
             return self.settings.hub_secret_key
         path = self.data_dir / ".secret_key"
         if path.exists():
-            key = path.read_text().strip()
+            key = path.read_text(encoding="utf-8").strip()
         else:
             self.data_dir.mkdir(parents=True, exist_ok=True)
             key = secrets.token_urlsafe(48)
-            path.write_text(key)
+            path.write_text(key, encoding="utf-8")
             log.warning("HUB_SECRET_KEY not set; generated one in %s", path)
         self.settings.hub_secret_key = key
         return key
@@ -108,6 +108,6 @@ def load_config(base_dir: Path | None = None, **overrides: Any) -> Config:
     toml_path = Path(settings.hub_toml)
     if not toml_path.is_absolute():
         toml_path = base / toml_path
-    toml = tomllib.loads(toml_path.read_text()) if toml_path.exists() else {}
-    env = {k: v for k, v in dotenv_values(env_file).items() if v} if env_file.exists() else {}
+    toml = tomllib.loads(toml_path.read_text(encoding="utf-8")) if toml_path.exists() else {}
+    env = {k: v for k, v in dotenv_values(env_file, encoding="utf-8").items() if v} if env_file.exists() else {}
     return Config(settings=settings, toml=toml, base_dir=base, env=env)

@@ -21,6 +21,14 @@ max_tokens_param = "max_completion_tokens"
 type = "openai_compat"
 base_url = "https://openrouter.ai/api/v1"
 
+# Local model servers. Both speak the OpenAI API; any other OpenAI-compatible
+# server (llama.cpp, vLLM, ...) can be added the same way.
+[ai.providers.lmstudio]
+type = "openai_compat"
+base_url = "http://localhost:1234/v1"   # LM Studio > Developer > Start server
+key_required = false
+timeout = 300
+
 [ai.providers.ollama]
 type = "openai_compat"
 base_url = "http://localhost:11434/v1"
@@ -34,7 +42,10 @@ type = "gemini"
 [ai.aliases]
 default = "anthropic:claude-opus-5-5"
 fast = "anthropic:claude-haiku-4-5-20251001"
-local = "ollama:llama3.1:8b"   # change to a model you have pulled (`ollama list`)
+# `local` must name a model your local server has. For LM Studio, use the model
+# identifier shown in the Developer tab (also listed at
+# http://localhost:1234/v1/models). For Ollama, use e.g. "ollama:llama3.1:8b".
+local = "lmstudio:qwen2.5-7b-instruct"
 
 # --- Outbound API connections (static credentials) --------------------------------
 # [connections.weather]
@@ -45,6 +56,7 @@ local = "ollama:llama3.1:8b"   # change to a model you have pulled (`ollama list
 # AI policy is enforced by the host: a call to a provider outside
 # allowed_providers raises AIPolicyError before any network request.
 
+# Finance may only use local model servers, never a cloud provider.
 [apps.finance.ai]
-allowed_providers = ["ollama"]
+allowed_providers = ["lmstudio", "ollama"]
 default_alias = "local"

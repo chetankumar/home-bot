@@ -1,7 +1,8 @@
 """Local-model fallback for alerts no regex understands.
 
-Numbers are masked first. The host's AI policy pins this app to Ollama, so
-even a misconfigured call can't send a bank email to a cloud provider.
+Numbers are masked first. The host's AI policy pins this app to local model
+servers (LM Studio / Ollama), so even a misconfigured call can't send a bank
+email to a cloud provider.
 """
 
 from __future__ import annotations

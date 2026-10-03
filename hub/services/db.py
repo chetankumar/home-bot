@@ -47,7 +47,7 @@ def apply_migrations(conn: sqlite3.Connection, migrations_dir: Path) -> list[str
     for path in migration_files(migrations_dir):
         if path.name in done:
             continue
-        script = path.read_text()
+        script = path.read_text(encoding="utf-8")
         # executescript commits first; wrap in an explicit transaction so a
         # failing migration leaves nothing half-applied.
         try:

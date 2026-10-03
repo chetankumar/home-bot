@@ -45,7 +45,7 @@ def test_copying_hello_adds_an_app_without_host_edits(hub_app, tmp_path):
     shutil.copytree(ROOT / "apps" / "hello", apps / "hello")
     shutil.copytree(ROOT / "apps" / "hello", apps / "second")
     init = apps / "second" / "__init__.py"
-    init.write_text(init.read_text().replace('id="hello"', 'id="second"'))
+    init.write_text(init.read_text(encoding="utf-8").replace('id="hello"', 'id="second"'), encoding="utf-8")
     app = hub_app(apps)
     assert {k: v.status for k, v in app.state.hub.registry.apps.items()} == {
         "hello": "loaded",

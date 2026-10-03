@@ -40,6 +40,12 @@ def build_router(ctx: AppContext) -> APIRouter:
     def budget() -> int | None:
         return ctx.kv.get("budget_paise")
 
+    def local_model() -> str:
+        try:
+            return ":".join(ctx.ai.resolve())
+        except AIError as e:  # misconfigured alias: show it rather than fail the page
+            return f"not configured ({e})"
+
     def back(path: str) -> RedirectResponse:
         return RedirectResponse(ctx.url(path), status_code=303)
 
@@ -329,6 +335,7 @@ def build_router(ctx: AppContext) -> APIRouter:
             saved=saved,
             connected=ctx.gmail.connected,
             ai_ready=ctx.ai.available(),
+            local_model=local_model(),
             sync_cron=ctx.config.get("sync_cron", "15 7 * * *"),
         )
 

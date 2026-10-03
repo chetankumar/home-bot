@@ -27,8 +27,9 @@ Building a plugin is covered separately in the
   PowerShell where `conda init powershell` has been run.
 - **git**.
 - Optional:
-  - [Ollama](https://ollama.com) with a model pulled, for local AI (the
-    Finance app uses it);
+  - [LM Studio](https://lmstudio.ai) (or [Ollama](https://ollama.com)) with
+    a model downloaded, for local AI (the Finance app uses it; see
+    [Local models](../README.md#local-models-lm-studio-or-ollama));
   - a Google Cloud OAuth client, for Gmail (see
     [Google Cloud OAuth setup](../README.md#google-cloud-oauth-setup-for-gmail)).
 
@@ -47,15 +48,31 @@ cd home-bot
 ```bash
 conda create -n home-hub python=3.12 -y
 conda activate home-hub
-python --version            # should print Python 3.12.x
+python -c "import sys; print(sys.executable)"
 ```
 
-Python 3.12 or newer is required.
+**Check that last line before installing anything.** It must print a path
+inside the env:
+
+- Windows: `...\envs\home-hub\python.exe`
+- macOS/Linux: `.../envs/home-hub/bin/python`
+
+If it prints anything else (e.g. `...\Python314\python.exe` or
+`/usr/bin/python3`), the env isn't active. Packages would then go into your
+global Python and can break other projects there. In that case:
+
+- Windows PowerShell: run `conda init powershell` once and open a new
+  window, or use the **Anaconda Prompt**.
+- macOS/Linux: run `conda init` and restart your shell.
+
+Python 3.12 or newer is required. Do this check in **every new terminal**
+before running the hub or `pip`; the env is only active in the window where
+you ran `conda activate`.
 
 ### 3. Install the dependencies
 
 ```bash
-pip install -r requirements.txt
+python -m pip install -r requirements.txt
 ```
 
 `requirements.txt` pins exact versions, generated from `uv.lock`, so you get
@@ -63,13 +80,20 @@ the same packages the hub was tested with. To run the test suite as well,
 install the dev requirements instead:
 
 ```bash
-pip install -r requirements-dev.txt
+python -m pip install -r requirements-dev.txt
 python -m pytest            # all tests should pass
 ```
 
-Install with `pip` inside the activated env. Don't use
-`conda install <package>`; mixing the two for the same packages causes
-version conflicts.
+Always use **`python -m pip`**, not bare `pip`. It guarantees the packages go
+into the same Python that runs the hub, because a bare `pip` on your PATH can
+belong to a different installation.
+
+Don't use `conda install <package>` for these; mixing conda and pip for the
+same packages causes version conflicts.
+
+If pip prints "dependency conflicts" mentioning packages this project doesn't
+use (langchain, opentelemetry, …), **stop**. You're installing into the wrong
+Python. Activate the env and repeat the check above.
 
 ### 4. Configure
 
@@ -91,8 +115,12 @@ Edit `.env`:
 Then check `hub.toml`:
 
 - `timezone` (default `Asia/Kolkata`);
-- the `local` alias under `[ai.aliases]`, which must name a model you've
-  pulled in Ollama (`ollama list`).
+- the `local` alias under `[ai.aliases]`, which must name a model your local
+  server has: `lmstudio:<model identifier>` (from LM Studio's Developer tab
+  or http://localhost:1234/v1/models), or `ollama:<model>` (from
+  `ollama list`).
+
+  Finance → Settings shows what `local` resolves to.
 
 `.env` and `data/` are gitignored. Never commit them.
 
@@ -201,7 +229,7 @@ env:
 
 ```bash
 conda activate home-hub
-pip install -r apps/plants/requirements.txt
+python -m pip install -r apps/plants/requirements.txt
 ```
 
 If you skip this step, the plugin fails to load with a
@@ -224,7 +252,7 @@ these:
 
   ```toml
   [apps.plants.ai]
-  allowed_providers = ["ollama"]
+  allowed_providers = ["lmstudio", "ollama"]   # local model servers only
   default_alias = "local"
   ```
 
@@ -263,7 +291,7 @@ Any scheduled jobs the plugin registered appear under **Scheduled jobs** on
 1. Stop the hub.
 2. Back up `data/apps/<id>.db` (see [Part 4](#back-up)).
 3. Replace the plugin folder with the new version (or `git pull` inside it).
-4. Install any new packages: `pip install -r apps/<id>/requirements.txt`.
+4. Install any new packages: `python -m pip install -r apps/<id>/requirements.txt`.
 5. Start the hub. New migrations in the update are applied automatically,
    and your existing data is kept.
 
@@ -379,7 +407,7 @@ same `HUB_SECRET_KEY`, which is why `.env` goes with it.
 # 1. stop the hub (Ctrl+C), then back up data/ and .env (above)
 git pull
 conda activate home-hub
-pip install -r requirements.txt      # picks up new or upgraded packages
+python -m pip install -r requirements.txt      # picks up new or upgraded packages
 python -m uvicorn hub.main:app --host 0.0.0.0 --port 8000
 ```
 
@@ -398,8 +426,8 @@ conda deactivate
 conda env remove -n home-hub
 conda create -n home-hub python=3.12 -y
 conda activate home-hub
-pip install -r requirements.txt
-pip install -r apps/<id>/requirements.txt   # for each plugin that has one
+python -m pip install -r requirements.txt
+python -m pip install -r apps/<id>/requirements.txt   # for each plugin that has one
 ```
 
 Your data is untouched. It lives in `data/`, not in the env.

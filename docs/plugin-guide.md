@@ -154,7 +154,7 @@ apps/<id>/
   - list it, pinned, in `apps/<id>/requirements.txt`;
   - mention it in your plugin's docstring.
 
-  Whoever installs the plugin runs `pip install -r apps/<id>/requirements.txt`
+  Whoever installs the plugin runs `python -m pip install -r apps/<id>/requirements.txt`
   (see [installation.md](installation.md#part-2-install-a-plugin)). The hub
   does not install packages itself. A missing package shows up as a
   `ModuleNotFoundError` on `/admin`, and only your plugin fails.
@@ -346,7 +346,7 @@ assert isinstance(r, Reminder)
 
 - `extract()` uses each provider's native structured output:
   - Anthropic: forced tool use;
-  - OpenAI, OpenRouter and Ollama: a JSON-schema `response_format`;
+  - OpenAI, OpenRouter, LM Studio and Ollama: a JSON-schema `response_format`;
   - Gemini: a response schema.
 
   It then validates the result with your Pydantic model. Fenced
@@ -364,6 +364,10 @@ assert isinstance(r, Reminder)
   hide AI features in the UI.
 - **`ctx.ai.default_model`**: your default alias (from policy, else
   `"default"`).
+- **`ctx.ai.resolve(model=None) -> tuple[str, str]`**: what an alias (default:
+  yours) points to, as `(provider, model)`. It doesn't check policy or keys,
+  and raises `AIError` for an unknown alias. Handy for showing "Using
+  lmstudio:qwen2.5-7b-instruct" on a settings page.
 - **`ctx.ai.allowed_providers`**: `list[str] | None` (`None` means any).
 
 #### Models and aliases
@@ -376,10 +380,13 @@ from `[ai.aliases]` in `hub.toml`. The shipped aliases are:
 |---|---|
 | `default` | `anthropic:claude-opus-5-5` |
 | `fast` | `anthropic:claude-haiku-4-5-20251001` |
-| `local` | `ollama:<model you pulled>` |
+| `local` | A local model server: `lmstudio:<model identifier>` (shipped default) or `ollama:<model>` |
 
-The configured providers are `anthropic`, `openai`, `openrouter`, `ollama`
-and `gemini`. **Prefer aliases** over hard-coded model ids, so the owner can
+The configured providers are `anthropic`, `openai`, `openrouter` and
+`gemini` (cloud), and `lmstudio` and `ollama` (local, no key needed). Any
+other OpenAI-compatible server can be added in `hub.toml` as
+`[ai.providers.<name>]` with `type = "openai_compat"`, its `base_url`, and
+`key_required = false`. **Prefer aliases** over hard-coded model ids, so the owner can
 re-point them in one place.
 
 #### Policy
@@ -388,13 +395,14 @@ Policy is enforced by the host, not by your code. If `hub.toml` has:
 
 ```toml
 [apps.plants.ai]
-allowed_providers = ["ollama"]   # omit = any provider
+allowed_providers = ["lmstudio", "ollama"]   # omit = any provider
 default_alias = "local"          # omit = "default"
 ```
 
 then any call that resolves to another provider raises `AIPolicyError`
 **before any network request**. Use this for plugins that handle private
-data.
+data. Listing both local servers means the owner can switch between LM Studio
+and Ollama by changing only the `local` alias.
 
 #### Errors
 
@@ -788,6 +796,10 @@ Breaking these rules breaks isolation or other plugins:
 9. **No module-level state shared across requests**, except caches you can
    rebuild. The process may restart at any time.
 10. **Times**: use `ctx.tz` for "today" and anything user-facing.
+11. **Always name the encoding** when reading or writing text files:
+    `path.read_text(encoding="utf-8")`, `open(p, encoding="utf-8")`.
+    Windows otherwise uses cp1252 and fails on any emoji or `₹`.
+    `tests/test_portability.py` enforces this for every plugin.
 
 ## 10. Configuration
 
@@ -802,7 +814,7 @@ reminder_cron = "0 8 * * *"
 connections = ["weather"]          # optional allow-list for ctx.http
 
 [apps.plants.ai]                   # -> enforced AI policy (optional)
-allowed_providers = ["ollama"]
+allowed_providers = ["lmstudio", "ollama"]
 default_alias = "local"
 
 [connections.weather]              # -> ctx.http.client("weather")
@@ -907,6 +919,7 @@ def test_ai_feature_without_network(hub_app):
 - [ ] New config keys are documented, and new secrets are added to
       `.env.example`.
 - [ ] Any extra pip packages are pinned in `apps/<id>/requirements.txt`.
+- [ ] Every `open()` / `read_text()` / `write_text()` passes `encoding="utf-8"`.
 - [ ] `uv run pytest` passes. After a restart, `/admin` shows the plugin as
       **loaded** and its jobs are listed.
 
