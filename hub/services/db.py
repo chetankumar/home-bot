@@ -92,6 +92,14 @@ class Database:
 
     connect = __call__
 
+    def migrations(self) -> list[str]:
+        """Names of every migration applied to this file, oldest first."""
+        with self() as conn:
+            try:
+                return [r[0] for r in conn.execute("SELECT name FROM _migrations ORDER BY rowid")]
+            except sqlite3.OperationalError:  # no migrations folder, so no table
+                return []
+
 
 # Apps get the same thing; the alias documents intent in type hints.
 AppDB = Database

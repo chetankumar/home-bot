@@ -18,18 +18,26 @@ APScheduler, httpx, and the `anthropic` / `openai` / `google-genai` SDKs.
 
 ## Quick start
 
-```powershell
-# Install uv once: https://docs.astral.sh/uv/getting-started/installation/
-uv sync
+**Full instructions: [docs/installation.md](docs/installation.md).** That
+guide covers a fresh conda env, LAN access, installing plugins, how
+migrations run, upgrades and backups. The short version:
+
+```bash
+git clone https://github.com/chetankumar/home-bot.git && cd home-bot
+conda create -n home-hub python=3.12 -y && conda activate home-hub
+pip install -r requirements.txt
 copy .env.example .env      # cp on macOS/Linux; then set HUB_PASSWORD
-uv run uvicorn hub.main:app --host 0.0.0.0 --port 8000
+python -m uvicorn hub.main:app --host 0.0.0.0 --port 8000
 ```
 
-Open http://localhost:8000 and log in with `HUB_PASSWORD`. From other devices
-on the LAN, use `http://<host-ip>:8000`. On Windows, allow inbound TCP 8000 in
-the firewall for the Private profile.
+Or, with [uv](https://docs.astral.sh/uv/): `uv sync`, then
+`uv run uvicorn hub.main:app --host 0.0.0.0 --port 8000`.
 
-Run the tests with `uv run pytest`.
+Open http://localhost:8000 and log in with `HUB_PASSWORD`. From other devices
+on the LAN, use `http://<host-ip>:8000`.
+
+Run the tests with `pip install -r requirements-dev.txt`, then
+`python -m pytest` (or `uv run pytest`).
 
 ### Configuration
 
@@ -66,7 +74,11 @@ for anyone, human or AI agent, building a new app. It covers:
 - the shared UI components;
 - configuration, testing, rules, and troubleshooting.
 
-In short:
+To **install** an existing plugin, see
+[docs/installation.md, Part 2](docs/installation.md#part-2-install-a-plugin).
+The hub applies each plugin's database migrations automatically at startup.
+
+To build one, in short:
 
 1. Copy `apps/hello` to `apps/<id>`, where `<id>` is lowercase letters,
    digits or `_`.
@@ -200,7 +212,8 @@ hub/            host: main.py (create_app), config, auth, plugin contract, regis
 apps/hello/     reference app
 apps/finance/   Finance app
 tests/          host + finance tests, fixture apps, redacted email fixtures
-docs/           plugin-guide.md: the reference for building plugins
+docs/           installation.md (install, plugins, migrations, upgrades);
+                plugin-guide.md (the reference for building plugins)
 ```
 
 ## Not included yet

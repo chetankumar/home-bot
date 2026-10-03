@@ -11,5 +11,9 @@ A FastAPI host (`hub/`) that loads self-contained plugin apps from `apps/<id>/`.
   `hub/services/*`, `hub/templates/components.html`), update
   `docs/plugin-guide.md` in the same change. `tests/test_docs.py` fails if
   something is undocumented.
+- Installing the hub, installing plugins, and how migrations run:
+  `docs/installation.md`. If you change dependencies in `pyproject.toml`,
+  regenerate `requirements.txt` / `requirements-dev.txt` (the commands are in
+  that doc).
 - Run `uv run pytest` before committing. Run the server with
   `uv run uvicorn hub.main:app --host 0.0.0.0 --port 8000`.

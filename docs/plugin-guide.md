@@ -6,6 +6,9 @@ provides, the shared UI, configuration, testing, and the rules a plugin must
 follow. You should not need to read the host source (`hub/`) to build a
 plugin. If you do, this guide is missing something.
 
+Installing the hub, installing someone else's plugin, and how migrations are
+run in production are covered in [installation.md](installation.md).
+
 - [1. What a plugin is](#1-what-a-plugin-is)
 - [2. Quick start](#2-quick-start)
 - [3. Folder layout](#3-folder-layout)
@@ -31,7 +34,8 @@ plugin. If you do, this guide is missing something.
 - Adding a plugin means adding a folder. You never edit the host (`hub/`) or
   another plugin.
 - Plugins are loaded once. **Restart the hub** to pick up new or changed code
-  (`uv run uvicorn hub.main:app --host 0.0.0.0 --port 8000`).
+  (`python -m uvicorn hub.main:app --host 0.0.0.0 --port 8000` in the conda
+  env, or `uv run uvicorn ...`).
 - Each plugin is isolated: a plugin that fails to import, or whose `setup()`
   raises, is marked *failed*. The launcher and `/admin` show it with its
   traceback, and the host and every other plugin keep running.
@@ -48,7 +52,7 @@ The fastest route is to copy the reference app:
 ```bash
 cp -r apps/hello apps/plants          # Windows: xcopy /E /I apps\hello apps\plants
 # then edit apps/plants/__init__.py: manifest.id = "plants", name, icon, description
-uv run uvicorn hub.main:app --host 0.0.0.0 --port 8000
+python -m uvicorn hub.main:app --host 0.0.0.0 --port 8000
 ```
 
 Or write one from scratch. The four files below are a complete, working
@@ -133,6 +137,7 @@ apps/<id>/
     <id>.html
     _partial.html      convention: leading underscore = HTMX partial
   static/              optional: served at /apps/<id>/static/
+  requirements.txt     optional: extra pip packages (see "Python dependencies")
   routes.py, sync.py…  optional: your own modules
 ```
 
@@ -142,6 +147,17 @@ apps/<id>/
   would load a second copy of the module.
 - Folders starting with `_` or `.`, and folders without an `__init__.py`,
   are ignored.
+- **Python dependencies.** Everything the hub installs can be imported
+  freely: FastAPI, httpx, Pydantic, Jinja2, APScheduler, cryptography, and
+  the anthropic, openai and google-genai SDKs. Prefer these. If you need
+  another package:
+  - list it, pinned, in `apps/<id>/requirements.txt`;
+  - mention it in your plugin's docstring.
+
+  Whoever installs the plugin runs `pip install -r apps/<id>/requirements.txt`
+  (see [installation.md](installation.md#part-2-install-a-plugin)). The hub
+  does not install packages itself. A missing package shows up as a
+  `ModuleNotFoundError` on `/admin`, and only your plugin fails.
 - Heavy imports can go inside `setup()` (see `apps/finance/__init__.py`), so
   that an import error is reported as that plugin failing.
 
@@ -262,6 +278,12 @@ with ctx.db() as conn:                     # sqlite3.Connection
 - Each file runs **once**, inside a transaction, and is recorded in a
   `_migrations` table inside your DB file. If a migration fails, nothing
   from it is applied and the plugin fails to load.
+- **The hub runs migrations, not you or your code.** It runs them
+  automatically at every startup, before `setup()`. There is no migrate
+  command to call, and plugin code must not create or alter tables itself.
+  The console logs `app <id>: applied migrations …`, and `/admin` shows each
+  plugin's latest migration. Full details are in
+  [installation.md, Part 3](installation.md#part-3-migrations-who-runs-them-and-when).
 - **Never edit a migration that has already run.** Add a new numbered file
   instead, e.g. `002_add_notes.sql` containing
   `ALTER TABLE plants ADD COLUMN notes TEXT;`.
@@ -884,6 +906,7 @@ def test_ai_feature_without_network(hub_app):
 - [ ] Pages look right at phone width and in dark mode.
 - [ ] New config keys are documented, and new secrets are added to
       `.env.example`.
+- [ ] Any extra pip packages are pinned in `apps/<id>/requirements.txt`.
 - [ ] `uv run pytest` passes. After a restart, `/admin` shows the plugin as
       **loaded** and its jobs are listed.
 

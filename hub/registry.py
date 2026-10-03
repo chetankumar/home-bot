@@ -152,6 +152,8 @@ class Registry:
         app_id = manifest.id
         app_cfg = hub.config.app_config(app_id)
         db = Database(hub.config.data_dir / "apps" / f"{app_id}.db", path / "migrations")
+        if db.applied:
+            log.info("app %s: applied migrations %s", app_id, ", ".join(db.applied))
         prefix = f"/apps/{app_id}"
         templates = make_templates(
             [path / "templates"],
