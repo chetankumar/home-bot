@@ -180,6 +180,54 @@ def test_untagged_queue_is_debits_only(fin):
         assert stats.untagged_count(conn) == 1
 
 
+def test_target_burn_rate_to_get_back_to_budget(fin):
+    seed(fin.ctx, [("2026-10-01T10:00:00", 6999, "debit", "Food")])
+    day10 = date(2026, 10, 10)  # 10 of 31 days gone, 21 left; rate = 699.90/day, projected 21,696.90
+    with fin.ctx.db() as conn:
+        ok = stats.burn(conn, 2026, 10, day10, budget=30000_00)
+        over = stats.burn(conn, 2026, 10, day10, budget=9000_00)
+        blown = stats.burn(conn, 2026, 10, day10, budget=5000_00)
+        none = stats.burn(conn, 2026, 10, day10, budget=None)
+        past = stats.burn(conn, 2026, 9, day10, budget=9000_00)
+        last_day = stats.burn(conn, 2026, 10, date(2026, 10, 31), budget=9000_00)
+    # on track: allowance is what's left over the days left, and no cut is needed
+    assert (ok.days_left, ok.target_daily, ok.cut_pct) == (21, (30000_00 - 6999_00) // 21, None)
+    # projected 21,697 > 9,000: must fall to (9000-6999)/21 = 95.28/day, a ~86% cut from 699.90
+    assert over.target_daily == 2001_00 // 21 == 9528
+    assert over.cut_pct == round(100 * (1 - 9528 / 69900)) == 86
+    assert over.target_daily * over.days_left <= over.remaining  # never plans to overshoot
+    # already over budget: nothing left to spend
+    assert (blown.remaining, blown.target_daily, blown.cut_pct) == (-1999_00, 0, 100)
+    # no budget, a finished month and the last day have no daily target
+    assert none.target_daily is None and past.target_daily is None and last_day.target_daily is None
+
+
+def test_dashboard_shows_target_burn(fin, monkeypatch):
+    import hub_apps.finance.routes as routes_mod
+
+    class Frozen(datetime):  # "today" is 10 Oct 2026, so 21 days are left
+        @classmethod
+        def now(cls, tz=None):
+            return datetime(2026, 10, 10, 12, tzinfo=tz)
+
+    monkeypatch.setattr(routes_mod, "datetime", Frozen)
+    client = login(TestClient(fin.app))
+    seed(fin.ctx, [("2026-10-01T10:00:00", 6999, "debit", "Food")])
+
+    def dash(budget_rupees):
+        fin.ctx.kv.set("budget_paise", budget_rupees * 100)
+        return client.get("/apps/finance/").text
+
+    html = dash(9000)  # projected far above budget: cut needed
+    assert "Target daily burn" in html and "₹95" in html and "cut 86%" in html and "for 21 days" in html
+    html = dash(30000)  # on track: an allowance, not a cut
+    assert "Daily allowance" in html and "₹1,095" in html and "cut" not in html.split("Daily allowance")[1][:200]
+    html = dash(5000)  # already over: nothing can bring it back this month
+    assert "Target daily burn" in html and "already ₹1,999 over budget" in html
+    fin.ctx.kv.delete("budget_paise")
+    assert "Target daily burn" not in client.get("/apps/finance/").text
+
+
 def test_trailing_average_needs_a_full_month(fin):
     seed(fin.ctx, [("2026-09-15T10:00:00", 9000, "debit", "Food")])
     with fin.ctx.db() as conn:
