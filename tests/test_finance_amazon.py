@@ -359,3 +359,158 @@ def test_migration_003_upgrades_a_database_with_data(tmp_path):
     with db() as conn:
         t = conn.execute("SELECT amount_paise, narration, order_id, order_match FROM transactions").fetchone()
     assert tuple(t) == (5000, "kept", None, None)
+
+
+# -- regression: a stray "rs ," in an email crashed the whole scan --------------------------------------
+STRAY = """Hello Test User, your order 402-9999999-8888888 is confirmed.
+
+Order #
+402-9999999-8888888
+
+Boat Headphones
+Quantity: 1
+Sold by cloudtail, rs , seller of record
+₹799.00
+
+Order Total: ₹799.00
+"""
+
+
+def test_stray_currency_lookalikes_are_not_amounts():
+    assert amazon.MONEY.search("many orders , rs , ok") is None
+    assert amazon.MONEY.search("Total: Rs , please") is None
+    assert amazon.MONEY.search("Price ₹1,299.50").group(1) == "1,299.50"
+    assert amazon.MONEY.search("INR 450").group(1) == "450"
+    o = amazon.parse_email("Ordered: \"Boat Headphones\"", STRAY)
+    assert (o.total_paise, [(i.title, i.price_paise) for i in o.items]) == (79900, [("Boat Headphones", 79900)])
+
+
+def test_one_unreadable_email_does_not_stop_the_scan(fin, monkeypatch):  # noqa: F811
+    import hub_apps.finance.amazon as amazon_mod
+
+    add_amazon(fin, "good1", "ordered_single_rs.txt", at(1, 9))
+    fin.gmail.add("bad", STRAY, at(2, 9), subject='Ordered: "Poison"', sender=SENDER)
+    add_amazon(fin, "good2", "ordered_two_items.txt", at(3, 9))
+    real = amazon_mod.parse_email
+
+    def parse(subject, body):
+        if "Poison" in subject:
+            raise ValueError("bad amount ','")
+        return real(subject, body)
+
+    monkeypatch.setattr(amazon_mod, "parse_email", parse)
+    result = fin.sync.run_sync(fin.ctx, now=at(4))["orders"]
+    assert "error" not in result and (result["new"], result["parsed"], result["unparsed"]) == (3, 2, 1)
+    assert count(fin.ctx, "SELECT COUNT(*) FROM orders") == 2  # both good orders were saved
+    bad = rows(fin, "SELECT status, error FROM order_emails WHERE gmail_id = 'bad'")[0]
+    assert bad["status"] == "unparsed" and "ValueError: bad amount" in bad["error"]
+    assert fin.sync.run_sync(fin.ctx, now=at(5))["orders"]["new"] == 0  # and the next sync is fine
+    html = login(TestClient(fin.app)).get(f"{BASE}/orders").text
+    assert "Poison" in html and "bad amount" in html  # visible for review, with the reason
+
+
+def test_one_unreadable_bank_alert_does_not_stop_the_sync(fin, monkeypatch):  # noqa: F811
+    import hub_apps.finance.sync as sync_mod
+
+    for i, (mid, name) in enumerate([("b1", "upi_debit.txt"), ("b2", "credit_card_v1.txt")]):
+        subject, body = fixture_email(name)
+        fin.gmail.add(mid, body, at(1 + i, 9), subject=subject)
+    real = sync_mod.parse_email
+
+    def parse(subject, body):
+        if "Credit Card" in body:
+            raise RuntimeError("parser blew up")
+        return real(subject, body)
+
+    monkeypatch.setattr(sync_mod, "parse_email", parse)
+    result = fin.sync.run_sync(fin.ctx, now=at(3))
+    assert (result["new"], result["parsed"], result["unparsed"]) == (2, 1, 1)
+    row = rows(fin, "SELECT status, error FROM emails WHERE gmail_id = 'b2'")[0]
+    assert row["status"] == "unparsed" and "parser blew up" in row["error"]
+    assert count(fin.ctx, "SELECT COUNT(*) FROM transactions") == 1
+
+
+# -- the Orders page's own sync -----------------------------------------------------------------------------
+def wait_idle(fin, job="orders"):  # noqa: F811
+    import time
+
+    for _ in range(300):
+        if not fin.ctx.scheduler.is_running(job):
+            return
+        time.sleep(0.01)
+    raise AssertionError("job did not finish")
+
+
+def test_orders_have_their_own_scheduled_job(fin):  # noqa: F811
+    jobs = {j["job_id"]: j for j in fin.app.state.hub.scheduler.jobs() if j["app_id"] == "finance"}
+    assert set(jobs) == {"sync", "orders"}
+    assert "hour='19'" in jobs["orders"]["trigger"] and "minute='45'" in jobs["orders"]["trigger"]
+
+
+def test_orders_job_scans_amazon_only_and_remembers_the_result(fin):  # noqa: F811
+    add_txn(fin, 2, 450)
+    add_amazon(fin, "a1", "ordered_single_rs.txt", at(1, 9))
+    subject, body = fixture_email("upi_debit.txt")
+    fin.gmail.add("bank1", body, at(2, 9), subject=subject)
+    assert fin.ctx.scheduler.run_now("orders", wait=True)
+    assert [q for q in fin.gmail.queries if "hdfcbank" in q] == []  # no bank mail touched
+    assert count(fin.ctx, "SELECT COUNT(*) FROM emails") == 0
+    assert fin.ctx.scheduler.last_run("orders")["status"] == "ok"
+    last = fin.ctx.kv.get("last_orders_sync")
+    assert (last["new"], last["parsed"], last["matched"]) == (1, 1, 1)
+
+
+def test_orders_sync_button_shows_live_status_then_refreshes(fin):  # noqa: F811
+    import threading
+
+    client = login(TestClient(fin.app))
+    gate = threading.Event()
+    real = fin.gmail.search
+    fin.gmail.search = lambda q, limit=2000: (gate.wait(5), real(q, limit))[1]
+    add_amazon(fin, "a1", "ordered_single_rs.txt", at(1, 9))
+
+    page = client.get(f"{BASE}/orders").text
+    assert "Sync orders" in page and 'hx-post="/apps/finance/orders/sync"' in page
+    r = client.post(f"{BASE}/orders/sync")
+    assert "Syncing orders…" in r.text and "every 2s" in r.text  # polling while it runs
+    assert "HX-Refresh" not in r.headers
+    assert client.post(f"{BASE}/orders/sync").text.count("every 2s") == 1  # a second click doesn't start another
+    gate.set()
+    wait_idle(fin)
+    done = client.get(f"{BASE}/orders/sync/status?watch=1")
+    assert done.headers["HX-Refresh"] == "true" and "every 2s" not in done.text
+    assert "1 new email(s)" in client.get(f"{BASE}/orders").text
+    assert count(fin.ctx, "SELECT COUNT(*) FROM orders") == 1
+
+
+def test_orders_sync_failure_is_recorded_and_shown(fin):  # noqa: F811
+    client = login(TestClient(fin.app))
+
+    def boom(q, limit=2000):
+        raise RuntimeError("gmail is down")
+
+    fin.gmail.search = boom
+    client.post(f"{BASE}/orders/sync")
+    wait_idle(fin)
+    run = fin.ctx.scheduler.last_run("orders")
+    assert run["status"] == "error" and "gmail is down" in run["error"]
+    assert fin.ctx.kv.get("last_orders_sync")["error"] == "gmail is down"
+    assert "gmail is down" in client.get(f"{BASE}/orders").text
+
+
+def test_orders_sync_needs_gmail_connected(fin):  # noqa: F811
+    client = login(TestClient(fin.app))
+    fin.gmail.connected = False
+    html = client.get(f"{BASE}/orders").text
+    assert "Gmail not connected" in html and "Sync orders" not in html
+    client.post(f"{BASE}/orders/sync")
+    assert fin.ctx.scheduler.last_run("orders") is None  # nothing was started
+
+
+def test_orders_cron_is_configurable(hub_app):
+    from tests.conftest import BASE_TOML
+
+    toml = {**BASE_TOML, "apps": {**BASE_TOML["apps"], "finance": {**BASE_TOML["apps"]["finance"], "orders_cron": "5 6 * * *"}}}
+    app = hub_app(toml=toml)
+    job = next(j for j in app.state.hub.scheduler.jobs() if j["id"] == "finance:orders")
+    assert "hour='6'" in job["trigger"] and "minute='5'" in job["trigger"]

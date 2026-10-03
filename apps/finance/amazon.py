@@ -19,9 +19,10 @@ from hub.services.ai import AIError
 from .parsers import collapse, mask, to_paise
 
 ORDER_NO = re.compile(r"\b(\d{3}-\d{7}-\d{7})\b")
-CURRENCY = r"(?:₹|rs\.?|inr)\s*"
-MONEY = re.compile(CURRENCY + r"([\d,]+(?:\.\d{1,2})?)", re.I)
-TOTAL = re.compile(r"(?:order total|grand total|total amount|order value)\s*:?\s*" + CURRENCY + r"([\d,]+(?:\.\d{1,2})?)", re.I)
+CURRENCY = r"(?:₹|(?<![a-z])(?:rs\.?|inr))\s*"  # not the "rs" inside "orders"
+AMOUNT = r"(\d[\d,]*(?:\.\d{1,2})?)"  # starts with a digit: never a bare comma
+MONEY = re.compile(CURRENCY + AMOUNT, re.I)
+TOTAL = re.compile(r"(?:order total|grand total|total amount|order value)\s*:?\s*" + CURRENCY + AMOUNT, re.I)
 QTY = re.compile(r"^\s*(?:quantity|qty)\s*:?\s*(\d+)\s*$", re.I)
 SUBJECT = re.compile(r"^\s*(ordered|shipped|delivered|out for delivery|cancel\w*)\s*:?\s*(.*)$", re.I | re.S)
 MORE_ITEMS = re.compile(r"\s+and\s+\d+\s+more\s+items?\s*$", re.I)

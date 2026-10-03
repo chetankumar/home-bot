@@ -7,6 +7,7 @@ to re-run: emails are keyed by Gmail id and orders by order number.
 from __future__ import annotations
 
 import sqlite3
+import threading
 from datetime import datetime, timedelta
 from typing import Any
 
@@ -15,6 +16,7 @@ from hub.plugin import AppContext
 from . import amazon, matching
 from .sync import local_iso
 
+JOB_ID = "orders"
 DEFAULT_SENDERS = ["auto-confirm@amazon.in"]
 DEFAULT_BACKFILL_DAYS = 90
 
@@ -63,7 +65,27 @@ def upsert_order(conn: sqlite3.Connection, parsed: amazon.ParsedOrder, received_
 
 
 def process_email(ctx: AppContext, conn: sqlite3.Connection, gmail_id: str, use_ai: bool = True) -> str:
-    """Parse one stored email and record the outcome. Returns its new status."""
+    """Parse one stored email and record the outcome. Returns its new status.
+
+    A failure while handling this email is contained: its changes are undone, it is kept
+    as 'unparsed' with the error for the Orders page, and the scan carries on.
+    """
+    conn.execute("SAVEPOINT process_email")
+    try:
+        status = _process_email(ctx, conn, gmail_id, use_ai)
+    except Exception as e:
+        conn.execute("ROLLBACK TO process_email")
+        ctx.log.exception("amazon: could not read email %s", gmail_id)
+        conn.execute(
+            "UPDATE order_emails SET status = 'unparsed', parser = NULL, error = ? WHERE gmail_id = ?",
+            (f"{type(e).__name__}: {e}", gmail_id),
+        )
+        status = "unparsed"
+    conn.execute("RELEASE process_email")
+    return status
+
+
+def _process_email(ctx: AppContext, conn: sqlite3.Connection, gmail_id: str, use_ai: bool) -> str:
     row = conn.execute("SELECT * FROM order_emails WHERE gmail_id = ?", (gmail_id,)).fetchone()
     parsed: Any = amazon.parse_email(row["subject"], row["body"])
     parser = parsed.parser if isinstance(parsed, amazon.ParsedOrder) else None
@@ -91,7 +113,29 @@ def process_email(ctx: AppContext, conn: sqlite3.Connection, gmail_id: str, use_
     return status
 
 
+# The full sync and the Orders-only job can overlap; scan one at a time.
+_scan_lock = threading.Lock()
+
+
 def sync_orders(ctx: AppContext, now: datetime) -> dict[str, int]:
+    """Scan Amazon order emails and match them to payments; remember how it went."""
+    with _scan_lock:
+        try:
+            stats = _scan(ctx, now)
+        except Exception as e:
+            ctx.kv.set("last_orders_sync", {"at": now.isoformat(timespec="seconds"), "error": str(e)})
+            raise
+    ctx.kv.set("last_orders_sync", {**stats, "at": now.isoformat(timespec="seconds")})
+    ctx.log.info("orders sync done: %s", stats)
+    return stats
+
+
+def run_orders_sync(ctx: AppContext) -> dict[str, int]:
+    """The scheduled / Sync-now job. Raises on failure so it lands in the job history."""
+    return sync_orders(ctx, datetime.now(ctx.tz))
+
+
+def _scan(ctx: AppContext, now: datetime) -> dict[str, int]:
     stats = {"fetched": 0, "new": 0, "parsed": 0, "ignored": 0, "unparsed": 0, "matched": 0}
     with ctx.db() as conn:
         start = since(ctx, conn, now)

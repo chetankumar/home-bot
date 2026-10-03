@@ -1,0 +1,18 @@
+{% import "components.html" as ui %}
+<div id="orders-sync" class="row"
+  {% if running %}hx-get="{{ app_url('/orders/sync/status') }}?watch=1" hx-trigger="every 2s" hx-swap="outerHTML"{% endif %}>
+  {% if not connected %}
+    {{ ui.badge("Gmail not connected", "warn") }} <a href="/connections">Connect</a>
+  {% else %}
+    <button class="small" hx-post="{{ app_url('/orders/sync') }}" hx-target="#orders-sync" hx-swap="outerHTML" {{ "disabled" if running }}>
+      {{ "Syncing orders…" if running else "Sync orders" }}
+    </button>
+    {{ ui.job_status(run) }}
+    {% if last and not running %}
+      <span class="muted">
+        {% if last.error %}{{ last.error }}
+        {% else %}{{ last.new }} new email(s) · {{ last.parsed }} read · {{ last.unparsed }} to check · {{ last.matched }} matched{% endif %}
+      </span>
+    {% endif %}
+  {% endif %}
+</div>

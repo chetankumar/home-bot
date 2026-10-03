@@ -239,6 +239,13 @@ redirect URI.
    - cancelled orders never match, and a cancellation frees an earlier match;
    - anything else stays unmatched; you can **link** or **unlink** by hand.
 
+   Orders have their own **Sync orders** button on the Orders page, with live
+   status, so you can refresh them without re-reading your bank alerts. They are
+   also scanned by the daily sync and again each evening at 19:45 (set
+   `orders_cron` under `[apps.finance]` to change it), so same-day orders and
+   shipping updates are picked up. A scan that fails shows its error there and
+   in the job history on `/admin`.
+
    The first run looks back 90 days; set `amazon_backfill_days` under
    `[apps.finance]` in `hub.toml` to change it. Orders from before your synced
    bank history are marked as such rather than as missing.
