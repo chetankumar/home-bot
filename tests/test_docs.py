@@ -11,7 +11,7 @@ from hub.services.scheduler import AppScheduler
 from hub.templating import HUB_TEMPLATES
 from tests.conftest import ROOT, login
 
-GUIDE = (ROOT / "docs" / "plugin-guide.md").read_text()
+GUIDE = (ROOT / "docs" / "plugin-guide.md").read_text(encoding="utf-8")
 
 
 def test_every_appcontext_member_is_documented():
@@ -34,7 +34,7 @@ def test_every_scheduler_method_is_documented():
 
 
 def test_every_component_macro_is_documented():
-    macros = re.findall(r"{% macro (\w+)\(", (HUB_TEMPLATES / "components.html").read_text())
+    macros = re.findall(r"{% macro (\w+)\(", (HUB_TEMPLATES / "components.html").read_text(encoding="utf-8"))
     assert macros
     missing = [m for m in macros if f"ui.{m}(" not in GUIDE]
     assert not missing, missing
@@ -52,7 +52,7 @@ def test_quick_start_plugin_loads_and_serves(hub_app, tmp_path):
     for rel, code in blocks:
         path = apps / rel
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(code)
+        path.write_text(code, encoding="utf-8")
     app = hub_app(apps)
     entry = app.state.hub.registry.apps["plants"]
     assert entry.status == "loaded", entry.error
@@ -70,10 +70,10 @@ def test_requirements_txt_covers_pyproject():
         return {re.split(r"[<>=\[ ;]", ln.strip(), maxsplit=1)[0].lower().replace("_", "-")
                 for ln in lines if ln.strip() and not ln.lstrip().startswith(("#", "-r"))}
 
-    project = tomllib.loads((ROOT / "pyproject.toml").read_text())
-    pinned = names((ROOT / "requirements.txt").read_text().splitlines())
+    project = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+    pinned = names((ROOT / "requirements.txt").read_text(encoding="utf-8").splitlines())
     missing = names(project["project"]["dependencies"]) - pinned
     assert not missing, f"regenerate requirements.txt (docs/installation.md): {missing}"
-    dev = names((ROOT / "requirements-dev.txt").read_text().splitlines())
+    dev = names((ROOT / "requirements-dev.txt").read_text(encoding="utf-8").splitlines())
     assert names(project["dependency-groups"]["dev"]) <= dev
-    assert (ROOT / "requirements-dev.txt").read_text().startswith("-r requirements.txt")
+    assert (ROOT / "requirements-dev.txt").read_text(encoding="utf-8").startswith("-r requirements.txt")

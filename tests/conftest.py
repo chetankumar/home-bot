@@ -82,6 +82,6 @@ class FakeGmail:
 
 def fixture_email(name: str) -> tuple[str, str]:
     """Fixture files: first line 'Subject: ...', blank line, then the body."""
-    text = (FIXTURES / "finance" / name).read_text()
+    text = (FIXTURES / "finance" / name).read_text(encoding="utf-8")
     head, _, body = text.partition("\n\n")
     return head.removeprefix("Subject: ").strip(), body.strip()

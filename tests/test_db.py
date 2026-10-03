@@ -9,10 +9,10 @@ def test_migrations_apply_in_numeric_order(tmp_path):
     mig = tmp_path / "migrations"
     mig.mkdir()
     # Lexical order would run 10 before 2.
-    (mig / "10_add_col.sql").write_text("ALTER TABLE t ADD COLUMN b TEXT;")
-    (mig / "2_create.sql").write_text("CREATE TABLE t (a TEXT);")
-    (mig / "1_first.sql").write_text("CREATE TABLE log (x);")
-    (mig / "notes.txt").write_text("ignored")
+    (mig / "10_add_col.sql").write_text("ALTER TABLE t ADD COLUMN b TEXT;", encoding="utf-8")
+    (mig / "2_create.sql").write_text("CREATE TABLE t (a TEXT);", encoding="utf-8")
+    (mig / "1_first.sql").write_text("CREATE TABLE log (x);", encoding="utf-8")
+    (mig / "notes.txt").write_text("ignored", encoding="utf-8")
     assert [p.name for p in migration_files(mig)] == ["1_first.sql", "2_create.sql", "10_add_col.sql"]
     db = Database(tmp_path / "x.db", mig)
     assert db.applied == ["1_first.sql", "2_create.sql", "10_add_col.sql"]
@@ -24,17 +24,17 @@ def test_migrations_apply_in_numeric_order(tmp_path):
 def test_migrations_are_idempotent(tmp_path):
     mig = tmp_path / "migrations"
     mig.mkdir()
-    (mig / "001_create.sql").write_text("CREATE TABLE t (a TEXT);")
+    (mig / "001_create.sql").write_text("CREATE TABLE t (a TEXT);", encoding="utf-8")
     assert Database(tmp_path / "x.db", mig).applied == ["001_create.sql"]
     assert Database(tmp_path / "x.db", mig).applied == []
-    (mig / "002_more.sql").write_text("CREATE TABLE u (a TEXT);")
+    (mig / "002_more.sql").write_text("CREATE TABLE u (a TEXT);", encoding="utf-8")
     assert Database(tmp_path / "x.db", mig).applied == ["002_more.sql"]
 
 
 def test_failed_migration_rolls_back(tmp_path):
     mig = tmp_path / "migrations"
     mig.mkdir()
-    (mig / "001_bad.sql").write_text("CREATE TABLE t (a TEXT); INSERT INTO nope VALUES (1);")
+    (mig / "001_bad.sql").write_text("CREATE TABLE t (a TEXT); INSERT INTO nope VALUES (1);", encoding="utf-8")
     with pytest.raises(sqlite3.OperationalError):
         Database(tmp_path / "x.db", mig)
     conn = connect(tmp_path / "x.db")
@@ -45,8 +45,8 @@ def test_failed_migration_rolls_back(tmp_path):
 def test_duplicate_numbers_rejected(tmp_path):
     mig = tmp_path / "m"
     mig.mkdir()
-    (mig / "001_a.sql").write_text("")
-    (mig / "1_b.sql").write_text("")
+    (mig / "001_a.sql").write_text("", encoding="utf-8")
+    (mig / "1_b.sql").write_text("", encoding="utf-8")
     with pytest.raises(ValueError):
         migration_files(mig)
 

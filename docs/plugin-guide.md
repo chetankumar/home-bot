@@ -788,6 +788,10 @@ Breaking these rules breaks isolation or other plugins:
 9. **No module-level state shared across requests**, except caches you can
    rebuild. The process may restart at any time.
 10. **Times**: use `ctx.tz` for "today" and anything user-facing.
+11. **Always name the encoding** when reading or writing text files:
+    `path.read_text(encoding="utf-8")`, `open(p, encoding="utf-8")`.
+    Windows otherwise uses cp1252 and fails on any emoji or `₹`.
+    `tests/test_portability.py` enforces this for every plugin.
 
 ## 10. Configuration
 
@@ -907,6 +911,7 @@ def test_ai_feature_without_network(hub_app):
 - [ ] New config keys are documented, and new secrets are added to
       `.env.example`.
 - [ ] Any extra pip packages are pinned in `apps/<id>/requirements.txt`.
+- [ ] Every `open()` / `read_text()` / `write_text()` passes `encoding="utf-8"`.
 - [ ] `uv run pytest` passes. After a restart, `/admin` shows the plugin as
       **loaded** and its jobs are listed.
 
