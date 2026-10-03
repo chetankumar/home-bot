@@ -18,8 +18,11 @@
   {% endcall %}
   {% call ui.card("Status") %}
     <p>Gmail: {% if connected %}{{ ui.badge("connected", "good") }}{% else %}{{ ui.badge("not connected", "warn") }} <a href="/connections">Connect</a>{% endif %}</p>
-    <p>Local model: {% if ai_ready %}{{ ui.badge("configured", "good") }}{% else %}{{ ui.badge("unavailable", "warn") }}{% endif %}
-      <span class="muted">used only for alerts the regex parsers don't understand; restricted to Ollama by hub.toml</span></p>
+    <p>Local model: <code>{{ local_model }}</code>
+      {% if ai_ready %}{{ ui.badge("configured", "good") }}{% else %}{{ ui.badge("not allowed or unavailable", "warn") }}{% endif %}
+      <span class="muted">used only for alerts the regex parsers don't understand, and to suggest categories.
+      Restricted to local model servers (LM Studio / Ollama) by <code>[apps.finance.ai]</code> in hub.toml;
+      change the <code>local</code> alias there to pick the model.</span></p>
     <p>Daily sync: <code>{{ sync_cron }}</code> <span class="muted">(hub timezone; set <code>sync_cron</code> under <code>[apps.finance]</code> in hub.toml)</span></p>
   {% endcall %}
 </div>

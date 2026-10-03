@@ -11,7 +11,7 @@ Two apps ship with it:
 - **Hello** (`apps/hello`): the reference app and the template to copy.
 - **Finance** (`apps/finance`): reads HDFC transaction alerts from Gmail,
   tags spends by recipient, and shows month-to-date burn against a budget.
-  Its AI use is pinned to a local Ollama model.
+  Its AI use is pinned to a local model server (LM Studio or Ollama).
 
 Stack: Python 3.12, FastAPI, Jinja2 + HTMX (vendored, no Node), SQLite,
 APScheduler, httpx, and the `anthropic` / `openai` / `google-genai` SDKs.
@@ -98,18 +98,19 @@ Models are addressed as `provider:model` or by an alias from `hub.toml`:
 [ai.aliases]
 default = "anthropic:claude-opus-5-5"
 fast    = "anthropic:claude-haiku-4-5-20251001"
-local   = "ollama:llama3.1:8b"
+local   = "lmstudio:qwen2.5-7b-instruct"
 ```
 
-Three adapters cover the five providers. `anthropic` uses the Messages API.
-`openai_compat` covers OpenAI, OpenRouter, Ollama, and any other `base_url`.
+Three adapters cover every provider. `anthropic` uses the Messages API.
+`openai_compat` covers OpenAI, OpenRouter, the local servers LM Studio and
+Ollama, and any other OpenAI-compatible `base_url`.
 `gemini` uses `google-genai`. Each key is read from `<NAME>_API_KEY` in `.env`
 (override with `api_key_env`). A provider without a key is reported as
 unavailable rather than failing startup.
 
 `extract()` uses each provider's native structured output (forced tool use for
 Anthropic, a JSON-schema `response_format` for OpenAI-compatible servers
-including Ollama, and a response schema for Gemini). It validates the result
+including LM Studio and Ollama, and a response schema for Gemini). It validates the result
 into your Pydantic model and retries once with the validation error if that
 fails.
 
@@ -117,21 +118,52 @@ fails.
 
 ```toml
 [apps.finance.ai]
-allowed_providers = ["ollama"]
+allowed_providers = ["lmstudio", "ollama"]   # local servers only, never cloud
 default_alias = "local"
 ```
 
 A call to any other provider raises `AIPolicyError` before any network
 request. `/admin` shows usage per app and provider, so you can confirm that
-Finance only ever used Ollama.
+Finance only ever used a local model.
 
-### Ollama
+### Local models (LM Studio or Ollama)
 
-Install Ollama, pull a model (for example `ollama pull llama3.1:8b`), and set
-the `local` alias in `hub.toml` to `ollama:<that model>`. Finance only uses the
-model as a fallback for alerts the regex parsers don't recognise, and to
-suggest categories for merchant names. If Ollama is down, sync still works and
-the unrecognised emails wait on the Review page.
+Finance uses the `local` alias in two places:
+- as a fallback for alerts the regex parsers don't recognise;
+- to suggest categories for merchant names.
+
+If the local server is down, sync still works and the unrecognised emails wait
+on the Review page. **Finance → Settings** shows which model `local` resolves
+to.
+
+**LM Studio** (the default in `hub.toml`):
+
+1. In LM Studio, download an instruct model. A 7–8B model such as Qwen2.5 7B
+   Instruct or Llama 3.1 8B Instruct is plenty for reading bank alerts.
+2. Open the **Developer** tab, select the model, and start the server. It
+   listens on `http://localhost:1234`.
+3. Copy the model's identifier, shown in the Developer tab and listed at
+   http://localhost:1234/v1/models. Set it in `hub.toml`:
+
+   ```toml
+   local = "lmstudio:<model identifier>"
+   ```
+
+4. Make sure the model is available when the daily sync runs at 07:15. Either
+   keep LM Studio running with the model loaded, or turn on just-in-time model
+   loading in the Developer settings, which loads the model on the first
+   request. LM Studio can also start its server at login.
+
+The hub talks to LM Studio through its OpenAI-compatible API, including
+JSON-schema structured output, so no extra setup is needed.
+
+**Ollama**: pull a model (`ollama pull llama3.1:8b`) and set
+`local = "ollama:llama3.1:8b"`.
+
+**Another local server** (llama.cpp's `llama-server`, vLLM, …): add a block
+like the `lmstudio` one in `hub.toml`. Use `type = "openai_compat"`, its
+`base_url`, and `key_required = false`. Add its name to
+`[apps.finance.ai] allowed_providers`.
 
 ## Google Cloud OAuth setup (for Gmail)
 

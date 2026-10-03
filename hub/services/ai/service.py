@@ -177,6 +177,10 @@ class AppAI:
             )
         return self._svc.provider(provider_name), model_name
 
+    def resolve(self, model: str | None = None) -> tuple[str, str]:
+        """Alias (default: this app's) -> (provider, model). Doesn't check policy or keys."""
+        return self._svc.resolve(model or self.default_model)
+
     def available(self, model: str | None = None) -> bool:
         try:
             self._target(model)

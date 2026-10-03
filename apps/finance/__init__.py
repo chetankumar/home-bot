@@ -1,6 +1,6 @@
 """Finance: HDFC alert emails -> tagged transactions -> monthly burn vs budget.
 
-All AI use is local (Ollama); hub.toml's [apps.finance.ai] policy enforces it.
+All AI use is local (LM Studio or Ollama); hub.toml's [apps.finance.ai] policy enforces it.
 """
 
 from fastapi import APIRouter

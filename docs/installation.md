@@ -27,8 +27,9 @@ Building a plugin is covered separately in the
   PowerShell where `conda init powershell` has been run.
 - **git**.
 - Optional:
-  - [Ollama](https://ollama.com) with a model pulled, for local AI (the
-    Finance app uses it);
+  - [LM Studio](https://lmstudio.ai) (or [Ollama](https://ollama.com)) with
+    a model downloaded, for local AI (the Finance app uses it; see
+    [Local models](../README.md#local-models-lm-studio-or-ollama));
   - a Google Cloud OAuth client, for Gmail (see
     [Google Cloud OAuth setup](../README.md#google-cloud-oauth-setup-for-gmail)).
 
@@ -114,8 +115,12 @@ Edit `.env`:
 Then check `hub.toml`:
 
 - `timezone` (default `Asia/Kolkata`);
-- the `local` alias under `[ai.aliases]`, which must name a model you've
-  pulled in Ollama (`ollama list`).
+- the `local` alias under `[ai.aliases]`, which must name a model your local
+  server has: `lmstudio:<model identifier>` (from LM Studio's Developer tab
+  or http://localhost:1234/v1/models), or `ollama:<model>` (from
+  `ollama list`).
+
+  Finance → Settings shows what `local` resolves to.
 
 `.env` and `data/` are gitignored. Never commit them.
 
@@ -247,7 +252,7 @@ these:
 
   ```toml
   [apps.plants.ai]
-  allowed_providers = ["ollama"]
+  allowed_providers = ["lmstudio", "ollama"]   # local model servers only
   default_alias = "local"
   ```
 

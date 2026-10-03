@@ -48,7 +48,7 @@ def gmail_query(sender_list: list[str], since: datetime) -> str:
 @dataclass
 class AIState:
     """Turns the model off for the rest of a run after the first connection failure,
-    so a stopped Ollama costs one timeout, not one per email."""
+    so a stopped local model server costs one timeout, not one per email."""
 
     enabled: bool = True
     error: str | None = None

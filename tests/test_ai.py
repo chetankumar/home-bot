@@ -162,3 +162,50 @@ def test_anthropic_extract_uses_forced_tool():
     assert out.data == {"name": "tea", "qty": 1}
     assert seen["tool_choice"] == {"type": "tool", "name": "Item"}
     assert seen["system"] == "sys" and [m["role"] for m in seen["messages"]] == ["user"]
+
+
+# -- the shipped hub.toml ------------------------------------------------------------------
+def test_shipped_config_keeps_finance_local(tmp_path):
+    from hub.config import load_config
+
+    cfg = load_config()  # the repo's real hub.toml
+    cfg.settings.hub_data_dir = str(tmp_path / "data")
+    service = AIService(cfg, hub_database(cfg.data_dir))
+
+    lm = service.providers["lmstudio"]
+    assert isinstance(lm, OpenAICompatProvider) and lm.available  # no API key needed
+    assert lm._base_url == "http://localhost:1234/v1"
+
+    fin = service.for_app("finance")
+    assert set(fin.allowed_providers) <= {"lmstudio", "ollama"}  # local servers only
+    assert fin.resolve()[0] in fin.allowed_providers and fin.available()
+    for cloud in ("default", "fast", "openai:gpt-x", "openrouter:x/y", "gemini:g"):
+        with pytest.raises(AIPolicyError):
+            fin.complete("bank email", model=cloud)
+    assert fin.resolve("ollama:llama3.1:8b") == ("ollama", "llama3.1:8b")
+
+
+def test_lmstudio_extract_sends_json_schema_to_local_server():
+    seen = {}
+
+    def create(**params):
+        seen.update(params)
+        msg = SimpleNamespace(content='{"name": "rice", "qty": 5}')
+        return SimpleNamespace(choices=[SimpleNamespace(message=msg)], usage=None)
+
+    p = OpenAICompatProvider("lmstudio", "", base_url="http://localhost:1234/v1", key_required=False)
+    assert p.client.base_url.host == "localhost" and p.client.base_url.port == 1234
+    p._client = SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=create)))
+    from hub.services.ai.base import Message
+
+    out = p.extract("qwen2.5-7b-instruct", [Message("user", "5 rice")], Item.model_json_schema(), "Item", 100)
+    assert out.data == '{"name": "rice", "qty": 5}'
+    assert seen["model"] == "qwen2.5-7b-instruct"
+    assert seen["response_format"]["type"] == "json_schema"
+
+
+def test_app_resolve(svc):
+    assert svc.for_app("finance").resolve() == ("ollama", "llama3.1:8b")
+    assert svc.for_app("hello").resolve("fast" if "fast" in svc.aliases else "default")[0] == "anthropic"
+    with pytest.raises(AIError):
+        svc.for_app("hello").resolve("nope")
