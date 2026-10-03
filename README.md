@@ -55,80 +55,28 @@ reconnect Google.
 
 Everything except `/login`, `/static` and `/healthz` requires login.
 
-## Adding an app
+## Building a plugin
 
-1. Copy `apps/hello` to `apps/<id>`. `<id>` must be lowercase letters,
+**See the [plugin guide](docs/plugin-guide.md).** It is the full reference
+for anyone, human or AI agent, building a new app. It covers:
+
+- the folder layout and manifest;
+- every host service on `ctx` (database, AI, HTTP, Gmail, scheduler, kv,
+  templates);
+- the shared UI components;
+- configuration, testing, rules, and troubleshooting.
+
+In short:
+
+1. Copy `apps/hello` to `apps/<id>`, where `<id>` is lowercase letters,
    digits or `_`.
-2. In `apps/<id>/__init__.py`, set `manifest.id` to the folder name and
-   change the name, icon and description.
-3. Restart the hub. The app is at `/apps/<id>/` with its own database at
-   `data/apps/<id>.db`.
+2. Set `manifest.id` to the folder name.
+3. Restart the hub. The app appears at `/apps/<id>/` with its own database
+   at `data/apps/<id>.db`.
 
-If an app fails to import or its `setup()` raises, only that app is marked
-failed. The traceback shows on `/admin` and every other app keeps working. To
-switch an app off without deleting it, add it to `disabled = [...]` in
-`hub.toml`.
-
-### The contract (`hub/plugin.py`)
-
-```python
-from fastapi import APIRouter
-from hub.plugin import AppContext, Manifest
-
-manifest = Manifest(id="plants", name="Plants", icon="🪴",
-                    description="Watering reminders", requires=[])
-
-def setup(ctx: AppContext) -> APIRouter:
-    router = APIRouter()
-
-    @router.get("/")
-    def index(request):
-        with ctx.db() as conn:
-            rows = conn.execute("SELECT * FROM plants").fetchall()
-        return ctx.render(request, "plants.html", plants=rows)
-
-    return router
-```
-
-An app touches the host only through `ctx`, and everything on it is scoped to
-that app:
-
-| Member | Gives you |
-|---|---|
-| `ctx.db()` | `with ctx.db() as conn:` opens a connection to `data/apps/<id>.db`. It commits on success, rolls back on error, and always closes. Migrations in `migrations/NNN_name.sql` are applied in numeric order before `setup()` runs. |
-| `ctx.ai` | `complete()`, `stream()`, `extract(schema=PydanticModel)`, `available()`. Pass `model="alias"` or `"provider:model"`. The host enforces the app's policy and tags usage with the app id. |
-| `ctx.http.client("name")` | An `httpx.Client` preconfigured from `[connections.name]` in `hub.toml`. |
-| `ctx.gmail` | `search(query)`, `get_message(id)`, `connected`. Present only if the manifest has `requires=["gmail"]`. Raises `NotConnected` until Google is connected. |
-| `ctx.scheduler` | `cron(job_id, fn, "15 7 * * *")`, `interval(job_id, fn, minutes=30)`, `run_now(job_id)`, `last_run(job_id)`, `is_running(job_id)`. Job errors are recorded in history and never crash the host. |
-| `ctx.kv` | `get` / `set` / `delete` / `all` for small JSON settings, stored in `hub.db`. |
-| `ctx.render(request, name, **context)` / `ctx.templates` | Jinja. The app's `templates/` is searched first, then the hub's (`base.html`, `components.html`). |
-| `ctx.tz` | `ZoneInfo` from `hub.toml`. |
-| `ctx.log` | Logger named `apps.<id>`. |
-| `ctx.config` | The app's `[apps.<id>]` table from `hub.toml`. |
-| `ctx.url("/path")` | `/apps/<id>/path`. In templates, use `app_url('/path')` and `app_static('file.css')`. |
-
-Static files in `apps/<id>/static/` are served at `/apps/<id>/static/`.
-
-### Shared UI components
-
-Templates extend `base.html` and import the macros:
-
-```jinja
-{% extends "base.html" %}
-{% import "components.html" as ui %}
-{% block content %}
-  {% call ui.stats() %}
-    {{ ui.stat_card("Spent", "₹12,300", sub="this month", tone="bad") }}
-  {% endcall %}
-  {% call ui.card("By category") %}
-    {{ ui.bars([("Food", 4200, "₹4,200"), ("Rent", 15000, "₹15,000")]) }}
-  {% endcall %}
-{% endblock %}
-```
-
-The full set is `stat_card`, `stats`, `card`, `bars`, `meter`, `badge`,
-`empty`, `flash`, `job_status` and `subnav`. The styles support light and
-dark mode and work at phone width.
+If an app fails to load, only that app is marked failed. The traceback is on
+`/admin`, and everything else keeps running. To switch an app off without
+deleting it, add it to `disabled = [...]` in `hub.toml`.
 
 ## AI providers
 
@@ -252,6 +200,7 @@ hub/            host: main.py (create_app), config, auth, plugin contract, regis
 apps/hello/     reference app
 apps/finance/   Finance app
 tests/          host + finance tests, fixture apps, redacted email fixtures
+docs/           plugin-guide.md: the reference for building plugins
 ```
 
 ## Not included yet
