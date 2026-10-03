@@ -29,6 +29,7 @@ def test_broken_apps_fail_alone(hub_app):
     assert client.get("/apps/nope/").status_code == 404
     admin = client.get("/admin")
     assert "boom in setup" in admin.text and "disabled" in admin.text
+    assert "001_things.sql" in admin.text  # schema version applied by the host
 
 
 def test_each_app_gets_its_own_database(hub_app, tmp_path):

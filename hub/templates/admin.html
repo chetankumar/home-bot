@@ -5,7 +5,7 @@
 
 {% call ui.card("Apps") %}
 <table>
-  <thead><tr><th>App</th><th>Status</th><th>Requires</th><th>Data</th></tr></thead>
+  <thead><tr><th>App</th><th>Status</th><th>Requires</th><th>Data / schema</th></tr></thead>
   <tbody>
   {% for a in apps %}
     <tr id="app-{{ a.id }}">
@@ -17,7 +17,10 @@
           {% for r in a.manifest.requires %}{{ ui.badge(r, "warn" if r in missing else "good") }} {% else %}<span class="muted">—</span>{% endfor %}
         {% endif %}
       </td>
-      <td class="muted">{% if a.ctx %}data/apps/{{ a.id }}.db{% endif %}</td>
+      <td class="muted">{% if a.ctx %}data/apps/{{ a.id }}.db
+        {% set migs = a.ctx.db.migrations() %}
+        <br>{% if migs %}{{ migs | length }} migration{{ "s" if migs | length != 1 }}, latest <code>{{ migs[-1] }}</code>{% else %}no migrations{% endif %}
+      {% endif %}</td>
     </tr>
     {% if a.error %}<tr><td colspan="4"><pre class="trace">{{ a.error }}</pre></td></tr>{% endif %}
   {% else %}

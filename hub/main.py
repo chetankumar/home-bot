@@ -64,6 +64,8 @@ def build_hub(config: Config) -> Hub:
     config.data_dir.mkdir(parents=True, exist_ok=True)
     secret = config.ensure_secret_key()
     db = hub_database(config.data_dir)
+    if db.applied:
+        log.info("hub.db: applied migrations %s", ", ".join(db.applied))
     oauth = OAuthService(TokenStore(db, fernet_from_secret(secret)), config.settings.hub_base_url)
     hub = Hub(
         config=config,
