@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import re
+
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -73,15 +75,18 @@ class FakeGmail:
         if not self.connected:
             raise NotConnected("Google is not connected")
         self.queries.append(query)
-        return [m.id for m in sorted(self.messages.values(), key=lambda m: m.received_at, reverse=True)]
+        wanted = re.search(r"from:\(([^)]*)\)", query)  # like Gmail, only mail from those senders
+        senders = {a.strip().lower() for a in wanted.group(1).split(" OR ")} if wanted else None
+        found = [m for m in self.messages.values() if senders is None or m.sender in senders]
+        return [m.id for m in sorted(found, key=lambda m: m.received_at, reverse=True)]
 
     def get_message(self, mid: str) -> GmailMessage:
         self.fetched.append(mid)
         return self.messages[mid]
 
 
-def fixture_email(name: str) -> tuple[str, str]:
+def fixture_email(name: str, folder: str = "finance") -> tuple[str, str]:
     """Fixture files: first line 'Subject: ...', blank line, then the body."""
-    text = (FIXTURES / "finance" / name).read_text(encoding="utf-8")
+    text = (FIXTURES / folder / name).read_text(encoding="utf-8")
     head, _, body = text.partition("\n\n")
     return head.removeprefix("Subject: ").strip(), body.strip()

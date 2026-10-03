@@ -207,15 +207,47 @@ redirect URI.
    the current month (IST). Later runs start from the newest stored email minus
    a day of overlap. A daily sync also runs at 07:15; to change it, set
    `sync_cron` under `[apps.finance]` in `hub.toml`.
-4. **Recipients** lists the counterparties you've paid, biggest spend first.
-   Name one and pick a category, and every past and future transaction with
-   that UPI id or merchant name is tagged. To attach another UPI id to someone
-   you've already named, reuse their name. A category set by hand on a single
-   transaction survives later re-tagging.
-5. **Review** shows emails that nothing could parse. You can enter the
+4. **Describe a spend instead of picking a category.** On **Transactions**,
+   type what it was ("weekly vegetables from the market") and click
+   **Categorise**. The local model files it under one of your categories, or,
+   if none fits, proposes a new one that you confirm with one click. Nothing is
+   created without that click. If the recipient has no category yet, it gets
+   this one, so future spends from them are filed automatically; a recipient
+   that already has a category is never changed. "Pick manually" under each
+   row is the fallback for when the model is off or wrong.
+5. **Recipients** lists the counterparties you've paid, biggest spend first.
+   Name one and say what you buy from them; the same flow picks (or proposes)
+   the category, and every past and future transaction with that UPI id or
+   merchant name is tagged. To attach another UPI id to someone you've already
+   named, reuse their name. A category set by hand on a single transaction
+   survives later re-tagging.
+6. **Categories** is yours to shape: add, rename, delete, merge two into one,
+   and mark which ones count as spending. Each category has a description
+   that is shown to the model, so wording it well teaches the model what
+   belongs there ("Food: restaurants, takeaway, Swiggy and Zomato").
+7. **Amazon orders.** Each sync also reads order emails from
+   `auto-confirm@amazon.in` (change the senders in Settings) and keeps the
+   items, total and status (placed, shipped, delivered, cancelled) on
+   **Orders**. Every order is then matched to the Amazon charge in your bank
+   alerts: same amount, charged from one day before to 14 days after the
+   order. A match shows the items on the transaction and pre-fills the
+   narration, so one click files it. Matching is cautious:
+   - an order and a charge that fit only each other match as **exact**;
+   - when two orders share an amount, the closest dates pair up and are marked
+     **check**;
+   - an order charged in two or three shipments matches all of them as a group;
+   - cancelled orders never match, and a cancellation frees an earlier match;
+   - anything else stays unmatched; you can **link** or **unlink** by hand.
+
+   The first run looks back 90 days; set `amazon_backfill_days` under
+   `[apps.finance]` in `hub.toml` to change it. Orders from before your synced
+   bank history are marked as such rather than as missing.
+8. **Review** shows emails that nothing could parse. You can enter the
    transaction by hand or ignore the email. After parsers improve,
    **Re-parse** runs them again over unparsed and auto-ignored mail; emails
-   you ignored by hand are left alone.
+   you ignored by hand are left alone. Amazon emails the parser couldn't read
+   wait on **Orders**, with their own Re-parse.
+
 
 How the numbers work:
 
@@ -224,14 +256,23 @@ How the numbers work:
   moves between your own accounts as Transfers.
 - **Daily burn** is spend ÷ days elapsed.
 - **Projected** is daily burn × days in the month.
+- **Target daily burn** (with a budget set) is what you can spend per day for
+  the rest of the month to finish exactly on budget: (budget − spent) ÷ days
+  left, rounded down. When the projection is over, it shows how far the
+  current rate must fall; when you're on track it reads **Daily allowance**;
+  when you've already exceeded the budget it says so, since no daily rate can
+  recover it.
 
 Once a full past month has been synced, Settings shows the trailing average
 as a budget hint.
 
-Raw email bodies are stored. HDFC's wording varies, so expect the first real
-sync to put some emails on the Review page. The parsers in
-`apps/finance/parsers.py` can then be tightened against them, with redacted
-samples added under `tests/fixtures/finance/`.
+Raw email bodies are stored. HDFC's and Amazon's wording varies and I have not
+seen your emails, so expect the first real sync to leave some on the Review and
+Orders pages. For Amazon, the parser reads the order number, items and total from
+the plain-text layout, then the subject line, then asks the local model; only the
+emails it still can't read wait for you. The parsers in
+`apps/finance/parsers.py` and `apps/finance/amazon.py` can then be tightened
+against them, with redacted samples added under `tests/fixtures/`.
 
 ## Layout
 

@@ -70,6 +70,9 @@ class Burn:
     budget: int | None
     remaining: int | None
     projected_over: int | None  # paise projected above budget (negative = under)
+    days_left: int = 0  # days after today in the month
+    target_daily: int | None = None  # paise/day you can spend from now to finish exactly on budget
+    cut_pct: int | None = None  # % the current daily rate must fall to hit target_daily (None = on track)
 
 
 def burn(conn: sqlite3.Connection, year: int, month: int, today: date, budget: int | None) -> Burn:
@@ -83,6 +86,13 @@ def burn(conn: sqlite3.Connection, year: int, month: int, today: date, budget: i
         days = 0
     rate = round(total / days) if days else 0
     projected = total if days == days_in_month else rate * days_in_month
+    remaining = (budget - total) if budget is not None else None
+    days_left = days_in_month - days
+    target = cut = None
+    if budget is not None and days_left > 0:
+        target = max(remaining, 0) // days_left  # floor: never plan to overshoot by rounding
+        if rate > target:
+            cut = round(100 * (1 - target / rate))
     return Burn(
         spent=total,
         days_elapsed=days,
@@ -90,8 +100,11 @@ def burn(conn: sqlite3.Connection, year: int, month: int, today: date, budget: i
         daily_rate=rate,
         projected=projected,
         budget=budget,
-        remaining=(budget - total) if budget is not None else None,
+        remaining=remaining,
         projected_over=(projected - budget) if budget is not None else None,
+        days_left=days_left,
+        target_daily=target,
+        cut_pct=cut,
     )
 
 

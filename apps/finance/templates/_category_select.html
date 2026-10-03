@@ -1,5 +1,0 @@
-<select name="category_id" aria-label="Category">
-  <option value="">—</option>
-  {% for c in categories %}<option value="{{ c.id }}" {{ "selected" if c.id == selected }}>{{ c.name }}</option>{% endfor %}
-</select>
-{% if error %}<span class="muted" title="{{ error }}">no suggestion</span>{% elif selected %}<span class="muted">suggested</span>{% endif %}

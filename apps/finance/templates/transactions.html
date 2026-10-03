@@ -11,7 +11,7 @@
 {% call ui.card() %}
 {% if rows %}
 <table>
-  <thead><tr><th>When</th><th>Counterparty</th><th>Via</th><th class="num">Amount</th><th>Recipient</th><th>Category</th></tr></thead>
+  <thead><tr><th>When</th><th>Counterparty</th><th>Via</th><th class="num">Amount</th><th>Category</th><th>Describe it, or pick manually</th></tr></thead>
   <tbody>
   {% for t in rows %}{% include "_txn_row.html" %}{% endfor %}
   </tbody>

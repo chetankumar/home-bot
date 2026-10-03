@@ -1,0 +1,46 @@
+{% import "components.html" as ui %}
+{% set base = app_url('/recipients/queue') %}
+<div>
+  {% if error %}{{ ui.flash(error, "bad") }}{% endif %}
+  {% if proposal %}
+  <div class="flash tone-info">
+    <div>No category fits. Create <strong>{{ proposal.name }}</strong>{% if not proposal.counts_as_spend %} <span class="muted">(not counted as spending)</span>{% endif %} for <strong>{{ person }}</strong>?</div>
+    <form class="row" hx-post="{{ base }}/confirm" hx-target="closest td" hx-swap="innerHTML">
+      <input type="hidden" name="key" value="{{ q.key }}"><input type="hidden" name="kind" value="{{ q.kind }}"><input type="hidden" name="raw" value="{{ q.raw }}">
+      <input type="hidden" name="name" value="{{ person }}"><input type="hidden" name="narration" value="{{ narration_text }}">
+      <input type="hidden" name="category_name" value="{{ proposal.name }}">
+      <input type="hidden" name="counts_as_spend" value="{{ '1' if proposal.counts_as_spend else '0' }}">
+      <button class="small">Create &amp; save</button>
+    </form>
+    <form class="row" hx-post="{{ base }}/confirm" hx-target="closest td" hx-swap="innerHTML">
+      <input type="hidden" name="key" value="{{ q.key }}"><input type="hidden" name="kind" value="{{ q.kind }}"><input type="hidden" name="raw" value="{{ q.raw }}">
+      <input type="hidden" name="name" value="{{ person }}"><input type="hidden" name="narration" value="{{ narration_text }}">
+      <select name="category_id" aria-label="Use an existing category" required>
+        <option value="">Use existing…</option>
+        {% for c in categories %}<option value="{{ c.id }}">{{ c.name }}</option>{% endfor %}
+      </select>
+      <button class="small secondary">Save</button>
+      <button type="button" class="small secondary" hx-get="{{ base }}/form" hx-vals='{"key": {{ q.key | tojson }}, "kind": {{ q.kind | tojson }}, "raw": {{ (q.raw or "") | tojson }}}'
+              hx-target="closest td" hx-swap="innerHTML">Cancel</button>
+    </form>
+  </div>
+  {% else %}
+  <form hx-post="{{ base }}/save" hx-target="closest td" hx-swap="innerHTML" hx-indicator="next .htmx-indicator">
+    <input type="hidden" name="key" value="{{ q.key }}"><input type="hidden" name="kind" value="{{ q.kind }}"><input type="hidden" name="raw" value="{{ q.raw }}">
+    <div class="row">
+      <input name="name" value="{{ person or '' }}" placeholder="Name" list="recipient-names" required size="12">
+      <input name="narration" value="{{ narration_text if narration_text is defined and narration_text else '' }}" maxlength="500" size="28"
+             placeholder="What do you buy from them? e.g. weekly vegetables">
+      <button class="small">Save</button>
+    </div>
+    <details {{ "open" if open_manual }}>
+      <summary class="muted">pick a category manually</summary>
+      <select name="category_id" aria-label="Category">
+        <option value="">—</option>
+        {% for c in categories %}<option value="{{ c.id }}">{{ c.name }}</option>{% endfor %}
+      </select>
+    </details>
+  </form>
+  <span class="htmx-indicator muted">thinking…</span>
+  {% endif %}
+</div>

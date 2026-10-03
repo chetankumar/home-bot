@@ -18,6 +18,18 @@
   {{ ui.stat_card("Projected month-end", burn.projected | inr(false),
       sub=(("over budget by " ~ (burn.projected_over | inr(false))) if burn.projected_over is not none and burn.projected_over > 0 else ("within budget" if burn.budget else "no budget set")),
       tone=("bad" if burn.projected_over is not none and burn.projected_over > 0 else none)) }}
+  {% if burn.budget and burn.target_daily is not none %}
+    {% if burn.remaining <= 0 %}
+      {{ ui.stat_card("Target daily burn", burn.target_daily | inr(false),
+          sub="already " ~ ((-burn.remaining) | inr(false)) ~ " over budget; " ~ burn.days_left ~ " days left", tone="bad") }}
+    {% elif burn.cut_pct and burn.projected_over > 0 %}
+      {{ ui.stat_card("Target daily burn", burn.target_daily | inr(false),
+          sub="to get back to budget: cut " ~ burn.cut_pct ~ "% from " ~ (burn.daily_rate | inr(false)) ~ "/day, for " ~ burn.days_left ~ " days", tone="warn") }}
+    {% else %}
+      {{ ui.stat_card("Daily allowance", burn.target_daily | inr(false),
+          sub="stay on budget: up to this per day for " ~ burn.days_left ~ " days (now " ~ (burn.daily_rate | inr(false)) ~ ")", tone="good") }}
+    {% endif %}
+  {% endif %}
   {% if burn.budget %}
   <div class="stat {{ 'tone-bad' if burn.remaining < 0 else 'tone-good' }}">
     <div class="stat-label">Remaining of {{ burn.budget | inr(false) }}</div>

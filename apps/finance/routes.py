@@ -11,8 +11,13 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 from hub.plugin import AppContext
 from hub.services.ai import AIError
 
+from . import categories as cats_db
 from . import stats, tagging
+from .category_routes import build_category_router
+from .order_routes import build_order_router
+from .queries import recipient_names, txn_rows
 from .parsers import Parsed, parse_date, to_paise
+from . import orders as orders_mod
 from .sync import JOB_ID, insert_transaction, reparse, senders
 
 INSTRUMENTS = ["upi", "credit_card", "debit_card", "netbanking", "atm"]
@@ -27,15 +32,14 @@ def _int(value: str | None) -> int | None:
 
 def build_router(ctx: AppContext) -> APIRouter:
     router = APIRouter()
+    router.include_router(build_category_router(ctx))
+    router.include_router(build_order_router(ctx))
 
     def today() -> date:
         return datetime.now(ctx.tz).date()
 
     def categories(conn: sqlite3.Connection) -> list[sqlite3.Row]:
-        return conn.execute("SELECT * FROM categories ORDER BY counts_as_spend DESC, name").fetchall()
-
-    def recipient_names(conn: sqlite3.Connection) -> list[sqlite3.Row]:
-        return conn.execute("SELECT id, name FROM recipients ORDER BY name").fetchall()
+        return cats_db.listing(conn)
 
     def budget() -> int | None:
         return ctx.kv.get("budget_paise")
@@ -101,16 +105,6 @@ def build_router(ctx: AppContext) -> APIRouter:
         return ctx.render(request, "_sync_status.html", headers=headers, watch=watch, **context)
 
     # -- transactions ------------------------------------------------------------------
-    def txn_rows(conn: sqlite3.Connection, where: str, params: tuple) -> list[dict]:
-        rows = conn.execute(
-            "SELECT t.*, c.name AS category, r.name AS recipient, c.counts_as_spend"
-            " FROM transactions t LEFT JOIN categories c ON c.id = t.category_id"
-            " LEFT JOIN recipients r ON r.id = t.recipient_id"
-            f" WHERE {where} ORDER BY t.occurred_at DESC, t.id DESC",
-            params,
-        ).fetchall()
-        return [dict(r) for r in rows]
-
     @router.get("/transactions", response_class=HTMLResponse)
     def transactions(request: Request, month: str | None = None):
         t = today()
@@ -201,25 +195,6 @@ def build_router(ctx: AppContext) -> APIRouter:
             rid = tagging.find_or_create_recipient(conn, name, _int(category_id))
             n = tagging.assign_key(conn, norm_key, norm_kind, rid) if norm_key else 0
         return back(f"/recipients?saved={name} ({n} transaction{'s' if n != 1 else ''} tagged)")
-
-    @router.post("/recipients/suggest", response_class=HTMLResponse)
-    def suggest_category(request: Request, key: str = Form(...), raw: str = Form("")):
-        with ctx.db() as conn:
-            cats = categories(conn)
-        names = [c["name"] for c in cats]
-        chosen, error = None, None
-        try:
-            answer = ctx.ai.complete(
-                f"Merchant: {raw or key}\nCategories: {', '.join(names)}\n"
-                "Which category fits this merchant best? Reply with the category name only.",
-                max_tokens=10,
-                temperature=0,
-            ).text.strip().strip(".").lower()
-            chosen = next((c["id"] for c in cats if c["name"].lower() == answer), None)
-            chosen = chosen or next((c["id"] for c in cats if c["name"].lower() in answer), None)
-        except AIError as e:
-            error = str(e)
-        return ctx.render(request, "_category_select.html", categories=cats, selected=chosen, error=error)
 
     @router.post("/recipients/{rid}")
     def update_recipient(rid: int, name: str = Form(...), category_id: str = Form("")):
@@ -331,6 +306,7 @@ def build_router(ctx: AppContext) -> APIRouter:
             "settings.html",
             budget=budget(),
             senders=senders(ctx),
+            amazon_senders=orders_mod.senders(ctx),
             hint=hint,
             saved=saved,
             connected=ctx.gmail.connected,
@@ -340,7 +316,9 @@ def build_router(ctx: AppContext) -> APIRouter:
         )
 
     @router.post("/settings")
-    def save_settings(budget_rupees: str = Form(""), sender_list: str = Form("")):
+    def save_settings(
+        budget_rupees: str = Form(""), sender_list: str = Form(""), amazon_sender_list: str = Form("")
+    ):
         if budget_rupees.strip():
             try:
                 ctx.kv.set("budget_paise", to_paise(budget_rupees.strip()))
@@ -351,6 +329,9 @@ def build_router(ctx: AppContext) -> APIRouter:
         addrs = [s.strip().lower() for s in sender_list.replace(",", "\n").splitlines() if s.strip()]
         if addrs:
             ctx.kv.set("senders", addrs)
+        amazon = [s.strip().lower() for s in amazon_sender_list.replace(",", "\n").splitlines() if s.strip()]
+        if amazon:
+            ctx.kv.set("amazon_senders", amazon)
         return back("/settings?saved=1")
 
     return router

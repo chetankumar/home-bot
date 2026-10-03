@@ -1,0 +1,3 @@
+Subject: Your Amazon.in order has been cancelled
+
+Hello Test User, your order 171-7654321-0987654 has been cancelled. Any amount paid will be refunded.

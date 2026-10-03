@@ -1,19 +1,63 @@
+{% import "components.html" as ui %}
+{% set url = app_url('/transactions/' ~ t.id) %}
 <tr id="txn-{{ t.id }}">
   <td>{{ t.occurred_at[:10] }}{% if t.occurred_at[11:16] != "00:00" %} <span class="muted">{{ t.occurred_at[11:16] }}</span>{% endif %}</td>
-  <td>{{ t.counterparty_raw or "—" }}{% if t.source != "regex" %} <span class="badge">{{ t.source }}</span>{% endif %}</td>
+  <td>{{ t.counterparty_raw or "—" }}{% if t.source != "regex" %} <span class="badge">{{ t.source }}</span>{% endif %}
+    {% if t.narration %}<div class="muted">“{{ t.narration }}”</div>{% endif %}
+    {% if t.order_summary %}<div class="muted" title="Amazon order {{ t.order_number }}">🛒 {{ t.order_summary }}
+      {% if t.order_match == "ambiguous" %}{{ ui.badge("check match", "warn") }}{% endif %}</div>{% endif %}
+  </td>
   <td class="muted">{{ t.instrument | replace("_", " ") }}{% if t.account_mask %} ··{{ t.account_mask }}{% endif %}</td>
   <td class="num" style="{{ 'color: var(--good)' if t.direction == 'credit' }}">{{ "+" if t.direction == "credit" }}{{ t.amount_paise | inr }}</td>
-  <td colspan="2">
-    <form class="row" hx-post="{{ app_url('/transactions/' ~ t.id) }}" hx-trigger="change" hx-target="#txn-{{ t.id }}" hx-swap="outerHTML">
-      <select name="recipient_id" aria-label="Recipient">
-        <option value="">—</option>
-        {% for r in recipients %}<option value="{{ r.id }}" {{ "selected" if r.id == t.recipient_id }}>{{ r.name }}</option>{% endfor %}
-      </select>
-      <select name="category_id" aria-label="Category">
-        <option value="">{{ "(from recipient)" if t.recipient_id else "—" }}</option>
-        {% for c in categories %}<option value="{{ c.id }}" {{ "selected" if t.category_manual and c.id == t.category_id }}>{{ c.name }}</option>{% endfor %}
-      </select>
-      {% if t.category and not t.category_manual %}<span class="muted">{{ t.category }}</span>{% endif %}
+  <td>
+    {% if t.category %}{{ ui.badge(t.category, "info" if t.category_manual else "neutral") }}
+      {% if t.counts_as_spend == 0 %}<div class="muted">not spending</div>{% endif %}
+    {% else %}<span class="muted">—</span>{% endif %}
+  </td>
+  <td>
+    {% if note %}{{ ui.flash(note, "good") }}{% endif %}
+    {% if error %}{{ ui.flash(error, "bad") }}{% endif %}
+
+    {% if proposal %}
+    <div class="flash tone-info">
+      <div>No category fits. Create <strong>{{ proposal.name }}</strong>{% if not proposal.counts_as_spend %} <span class="muted">(not counted as spending)</span>{% endif %}?</div>
+      <form class="row" hx-post="{{ url }}/narrate/confirm" hx-target="#txn-{{ t.id }}" hx-swap="outerHTML">
+        <input type="hidden" name="narration" value="{{ narration_text }}">
+        <input type="hidden" name="name" value="{{ proposal.name }}">
+        <input type="hidden" name="counts_as_spend" value="{{ '1' if proposal.counts_as_spend else '0' }}">
+        <button class="small">Create &amp; assign</button>
+      </form>
+      <form class="row" hx-post="{{ url }}/narrate/confirm" hx-target="#txn-{{ t.id }}" hx-swap="outerHTML">
+        <input type="hidden" name="narration" value="{{ narration_text }}">
+        <select name="category_id" aria-label="Use an existing category" required>
+          <option value="">Use existing…</option>
+          {% for c in categories %}<option value="{{ c.id }}">{{ c.name }}</option>{% endfor %}
+        </select>
+        <button class="small secondary">Assign</button>
+        <button type="button" class="small secondary" hx-get="{{ url }}/row" hx-target="#txn-{{ t.id }}" hx-swap="outerHTML">Cancel</button>
+      </form>
+    </div>
+    {% else %}
+    <form class="row" hx-post="{{ url }}/narrate" hx-target="#txn-{{ t.id }}" hx-swap="outerHTML" hx-indicator="#spin-{{ t.id }}">
+      <input name="narration" value="{{ narration_text if narration_text is defined and narration_text else (t.narration or t.order_summary or '') }}" maxlength="500" size="26"
+             placeholder="What was this? e.g. weekly vegetables" aria-label="Describe this spend">
+      <button class="small">Categorise</button>
+      <span id="spin-{{ t.id }}" class="htmx-indicator muted">thinking…</span>
     </form>
+    {% endif %}
+
+    <details {{ "open" if open_manual }}>
+      <summary class="muted">pick manually</summary>
+      <form class="row" hx-post="{{ url }}" hx-trigger="change" hx-target="#txn-{{ t.id }}" hx-swap="outerHTML">
+        <select name="recipient_id" aria-label="Recipient">
+          <option value="">—</option>
+          {% for r in recipients %}<option value="{{ r.id }}" {{ "selected" if r.id == t.recipient_id }}>{{ r.name }}</option>{% endfor %}
+        </select>
+        <select name="category_id" aria-label="Category">
+          <option value="">{{ "(from recipient)" if t.recipient_id else "—" }}</option>
+          {% for c in categories %}<option value="{{ c.id }}" {{ "selected" if t.category_manual and c.id == t.category_id }}>{{ c.name }}</option>{% endfor %}
+        </select>
+      </form>
+    </details>
   </td>
 </tr>
