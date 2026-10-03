@@ -1,0 +1,13 @@
+{% if notes %}
+<table>
+  {% for n in notes %}
+  <tr>
+    <td>{{ n.body }}</td>
+    <td class="muted">{{ n.created_at }}</td>
+    <td><button class="small secondary" hx-post="{{ app_url('/notes/' ~ n.id ~ '/delete') }}" hx-target="#notes">✕</button></td>
+  </tr>
+  {% endfor %}
+</table>
+{% else %}
+<p class="muted">No notes yet.</p>
+{% endif %}

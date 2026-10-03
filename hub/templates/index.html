@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+{% import "components.html" as ui %}
+{% block content %}
+<h1>Apps</h1>
+{% if not apps %}
+  {{ ui.empty("No apps found. Add a folder under apps/ (copy apps/hello) and restart.") }}
+{% endif %}
+<div class="grid">
+  {% for item in apps %}
+    {% set a = item.entry %}
+    {% if a.status == "loaded" %}
+    <a class="app-tile" href="/apps/{{ a.id }}/">
+      <div class="app-icon">{{ a.icon }}</div>
+      <div>
+        <div class="app-name">{{ a.name }}</div>
+        <div class="muted">{{ a.manifest.description }}</div>
+        {% for req in item.missing %}<div>{{ ui.badge("needs " ~ req.label ~ " connection", "warn") }}</div>{% endfor %}
+      </div>
+    </a>
+    {% else %}
+    <a class="app-tile failed" href="/admin#app-{{ a.id }}">
+      <div class="app-icon">⚠️</div>
+      <div>
+        <div class="app-name">{{ a.name }}</div>
+        {{ ui.badge("failed to load", "bad") }}
+      </div>
+    </a>
+    {% endif %}
+  {% endfor %}
+</div>
+{% endblock %}

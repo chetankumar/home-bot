@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+{% import "components.html" as ui %}
+{% block content %}
+<h1>{{ app.icon }} {{ app.name }}</h1>
+
+{% call ui.stats() %}
+  {{ ui.stat_card("Notes", notes | length) }}
+  {{ ui.stat_card("Last heartbeat", last_heartbeat | dt if last_heartbeat else "—", sub="interval job, every 30 min") }}
+{% endcall %}
+
+<div class="columns">
+  {% call ui.card("Notes") %}
+    <form hx-post="{{ app_url('/notes') }}" hx-target="#notes" hx-on::after-request="this.reset()"
+          method="post" action="{{ app_url('/notes') }}" class="row">
+      <input name="body" placeholder="Write a note…" required style="flex:1">
+      <button>Add</button>
+    </form>
+    <div id="notes">{% include "_notes.html" %}</div>
+  {% endcall %}
+
+  {% call ui.card("AI summary") %}
+    {% if not ai_ready %}{{ ui.flash("No AI provider is configured for the 'fast' alias; set a key in .env.", "warn") }}{% endif %}
+    <button hx-post="{{ app_url('/summarise') }}" hx-target="#summary" hx-indicator="#summary-spin">Summarise notes</button>
+    <span id="summary-spin" class="htmx-indicator muted">thinking…</span>
+    <div id="summary"></div>
+  {% endcall %}
+</div>
+{% endblock %}

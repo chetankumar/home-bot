@@ -1,0 +1,11 @@
+{% extends "base.html" %}
+{% import "components.html" as ui %}
+{% block content %}
+<h1>{{ entry.icon }} {{ entry.name }}</h1>
+{% if entry.status == "disabled" %}
+  {{ ui.flash("This app is disabled in hub.toml.", "warn") }}
+{% else %}
+  {{ ui.flash("This app failed to load. The rest of the hub is fine.", "bad") }}
+  <pre class="trace">{{ entry.error }}</pre>
+{% endif %}
+{% endblock %}

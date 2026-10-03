@@ -1,0 +1,50 @@
+# Home Hub configuration. Secrets (passwords, API keys, OAuth client) go in .env.
+
+timezone = "Asia/Kolkata"
+
+# Apps listed here are skipped at startup without deleting their folder.
+disabled = []
+
+# --- AI providers -------------------------------------------------------------
+# API keys come from <NAME>_API_KEY in .env unless `api_key_env` says otherwise.
+# A provider without a key is simply unavailable; it never blocks startup.
+
+[ai.providers.anthropic]
+type = "anthropic"
+
+[ai.providers.openai]
+type = "openai_compat"
+# Newer OpenAI reasoning models want this instead of max_tokens.
+max_tokens_param = "max_completion_tokens"
+
+[ai.providers.openrouter]
+type = "openai_compat"
+base_url = "https://openrouter.ai/api/v1"
+
+[ai.providers.ollama]
+type = "openai_compat"
+base_url = "http://localhost:11434/v1"
+key_required = false
+timeout = 300
+
+[ai.providers.gemini]
+type = "gemini"
+
+# Models are "provider:model" or one of these aliases.
+[ai.aliases]
+default = "anthropic:claude-opus-5-5"
+fast = "anthropic:claude-haiku-4-5-20251001"
+local = "ollama:llama3.1:8b"   # change to a model you have pulled (`ollama list`)
+
+# --- Outbound API connections (static credentials) --------------------------------
+# [connections.weather]
+# base_url = "https://api.openweathermap.org/data/2.5"
+# auth = { type = "query", name = "appid", env = "OPENWEATHER_API_KEY" }
+
+# --- Per-app settings ---------------------------------------------------------------
+# AI policy is enforced by the host: a call to a provider outside
+# allowed_providers raises AIPolicyError before any network request.
+
+[apps.finance.ai]
+allowed_providers = ["ollama"]
+default_alias = "local"

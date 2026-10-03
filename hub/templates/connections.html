@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+{% import "components.html" as ui %}
+{% block content %}
+<h1>Connections</h1>
+{{ ui.flash(error, "bad") }}
+{% if ok %}{{ ui.flash("Connected " ~ ok ~ ".", "good") }}{% endif %}
+{% for c in connections %}
+  {% call ui.card(c.label) %}
+    <p>
+      {% if c.connected %}{{ ui.badge("connected", "good") }}
+        {% if c.account %}as <strong>{{ c.account }}</strong>{% endif %}
+        <span class="muted">since {{ c.connected_at | dt }}</span>
+      {% elif not c.configured %}{{ ui.badge("not configured", "warn") }}
+      {% else %}{{ ui.badge("not connected", "warn") }}{% endif %}
+    </p>
+    <p class="muted">Used by:
+      {% for a in c.used_by %}{{ a.icon }} {{ a.name }}{{ ", " if not loop.last }}{% else %}no apps{% endfor %}
+      · Scopes: {% for s in c.scopes %}<code>{{ s.rsplit('/', 1)[-1] }}</code>{{ " " }}{% else %}none{% endfor %}
+    </p>
+    {% if not c.configured %}
+      <p>Set <code>GOOGLE_CLIENT_ID</code> and <code>GOOGLE_CLIENT_SECRET</code> in <code>.env</code>
+      (see README, "Google Cloud OAuth setup") and restart. Redirect URI to register:
+      <code>{{ c.redirect_uri }}</code></p>
+    {% elif c.connected %}
+      <form method="post" action="/connections/{{ c.name }}/disconnect" class="inline">
+        <button class="secondary">Disconnect</button>
+      </form>
+      <a class="button secondary" href="/connections/{{ c.name }}/start">Reconnect</a>
+    {% elif on_host %}
+      <a class="button" href="/connections/{{ c.name }}/start">Connect {{ c.label }}</a>
+    {% else %}
+      {{ ui.flash("Google only redirects back to localhost, so do the one-time connect in a browser on the host PC at " ~ base_url ~ "/connections. After that this works from any device.", "warn") }}
+    {% endif %}
+  {% endcall %}
+{% endfor %}
+{% endblock %}

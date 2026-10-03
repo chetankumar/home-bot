@@ -1,0 +1,21 @@
+{% extends "finance_base.html" %}
+{% block content %}
+<div class="card-head">
+  <h1>Transactions · {{ month_label }}</h1>
+  <form class="row" method="get">
+    <a class="button secondary small" href="?month={{ '%04d-%02d' % prev }}">‹</a>
+    <input type="month" name="month" value="{{ ym }}" onchange="this.form.submit()">
+    <a class="button secondary small" href="?month={{ '%04d-%02d' % next }}">›</a>
+  </form>
+</div>
+{% call ui.card() %}
+{% if rows %}
+<table>
+  <thead><tr><th>When</th><th>Counterparty</th><th>Via</th><th class="num">Amount</th><th>Recipient</th><th>Category</th></tr></thead>
+  <tbody>
+  {% for t in rows %}{% include "_txn_row.html" %}{% endfor %}
+  </tbody>
+</table>
+{% else %}{{ ui.empty("No transactions this month.") }}{% endif %}
+{% endcall %}
+{% endblock %}

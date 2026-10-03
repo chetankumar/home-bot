@@ -1,0 +1,3 @@
+Subject: You have done a UPI txn. Check details!
+
+Dear Customer, Rs.120.00 has been debited from account 4321 to VPA paytmqr1abcd@paytm on 01-10-26. Your UPI transaction reference number is 527512345679.

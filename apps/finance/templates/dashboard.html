@@ -1,0 +1,58 @@
+{% extends "finance_base.html" %}
+{% block content %}
+<div class="card-head">
+  <h1>{{ month_label }}</h1>
+  <div class="row">
+    <a class="button secondary small" href="{{ app_url('/') }}?month={{ '%04d-%02d' % prev }}">‹</a>
+    {% if not is_current %}<a class="button secondary small" href="{{ app_url('/') }}">This month</a>{% endif %}
+    <a class="button secondary small" href="{{ app_url('/') }}?month={{ '%04d-%02d' % next }}">›</a>
+  </div>
+</div>
+
+{% include "_sync_status.html" %}
+<p></p>
+
+{% call ui.stats() %}
+  {{ ui.stat_card("Spent", burn.spent | inr(false), sub="Credits in: " ~ (credits | inr(false))) }}
+  {{ ui.stat_card("Daily burn", burn.daily_rate | inr(false), sub="over " ~ burn.days_elapsed ~ " of " ~ burn.days_in_month ~ " days") }}
+  {{ ui.stat_card("Projected month-end", burn.projected | inr(false),
+      sub=(("over budget by " ~ (burn.projected_over | inr(false))) if burn.projected_over is not none and burn.projected_over > 0 else ("within budget" if burn.budget else "no budget set")),
+      tone=("bad" if burn.projected_over is not none and burn.projected_over > 0 else none)) }}
+  {% if burn.budget %}
+  <div class="stat {{ 'tone-bad' if burn.remaining < 0 else 'tone-good' }}">
+    <div class="stat-label">Remaining of {{ burn.budget | inr(false) }}</div>
+    <div class="stat-value">{{ burn.remaining | inr(false) }}</div>
+    {{ ui.meter(burn.spent, burn.budget) }}
+  </div>
+  {% else %}
+    {{ ui.stat_card("Budget", "—", sub="set one in Settings") }}
+  {% endif %}
+{% endcall %}
+
+{% if untagged or unparsed %}
+<div class="flash tone-warn">
+  {% if untagged %}<a href="{{ app_url('/recipients') }}">{{ untagged }} recipient{{ "s" if untagged != 1 }} to tag</a>{% endif %}
+  {% if untagged and unparsed %} · {% endif %}
+  {% if unparsed %}<a href="{{ app_url('/review') }}">{{ unparsed }} email{{ "s" if unparsed != 1 }} to review</a>{% endif %}
+</div>
+{% endif %}
+
+<div class="columns">
+  {% call ui.card("By category") %}
+    {{ ui.bars(categories, empty="No spends this month yet.") }}
+  {% endcall %}
+  {% call ui.card("Top recipients") %}
+    {% if top %}
+    <table>
+      {% for r in top %}
+      <tr>
+        <td>{{ r.name }} {% if not r.tagged %}{{ ui.badge("untagged", "warn") }}{% endif %}</td>
+        <td class="num muted">{{ r.n }}×</td>
+        <td class="num">{{ r.total | inr(false) }}</td>
+      </tr>
+      {% endfor %}
+    </table>
+    {% else %}{{ ui.empty("No spends this month yet.") }}{% endif %}
+  {% endcall %}
+</div>
+{% endblock %}

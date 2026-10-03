@@ -1,0 +1,3 @@
+Subject: Transaction alert
+
+Hello, a spend of INR 349 happened at ZOMATO via card XX9876 today.

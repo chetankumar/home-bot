@@ -1,0 +1,20 @@
+{% import "components.html" as ui %}
+<div id="sync-status" class="row"
+  {% if running %}hx-get="{{ app_url('/sync/status') }}?watch=1" hx-trigger="every 2s" hx-swap="outerHTML"{% endif %}>
+  {% if not connected %}
+    {{ ui.badge("Gmail not connected", "warn") }} <a href="/connections">Connect</a>
+  {% else %}
+    <button class="small" hx-post="{{ app_url('/sync') }}" hx-target="#sync-status" hx-swap="outerHTML" {{ "disabled" if running }}>
+      {{ "Syncing…" if running else "Sync now" }}
+    </button>
+    <span>Last sync: {{ ui.job_status(run) }}</span>
+    {% if last_sync and not running %}
+      <span class="muted">
+        {% if last_sync.error %}{{ last_sync.error }}{% else %}
+        {{ last_sync.new }} new · {{ last_sync.parsed }} parsed · {{ last_sync.ignored }} ignored · {{ last_sync.unparsed }} to review
+        {% endif %}
+        {% if last_sync.ai_error %}· {{ last_sync.ai_error }}{% endif %}
+      </span>
+    {% endif %}
+  {% endif %}
+</div>
