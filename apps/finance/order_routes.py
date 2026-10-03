@@ -18,6 +18,26 @@ def build_order_router(ctx: AppContext) -> APIRouter:
     def back(**params: str) -> RedirectResponse:
         return RedirectResponse(ctx.url("/orders") + ("?" + urlencode(params) if params else ""), status_code=303)
 
+    def sync_context() -> dict:
+        return {
+            "run": ctx.scheduler.last_run(orders.JOB_ID),
+            "running": ctx.scheduler.is_running(orders.JOB_ID),
+            "last": ctx.kv.get("last_orders_sync"),
+            "connected": ctx.gmail.connected,
+        }
+
+    @router.post("/orders/sync", response_class=HTMLResponse)
+    def sync_now(request: Request):
+        if ctx.gmail.connected:
+            ctx.scheduler.run_now(orders.JOB_ID)  # is_running() is true as soon as this returns
+        return orders_sync_status(request, watch=True)
+
+    @router.get("/orders/sync/status", response_class=HTMLResponse)
+    def orders_sync_status(request: Request, watch: bool = False):
+        context = sync_context()
+        headers = {"HX-Refresh": "true"} if watch and not context["running"] else None  # done: reload the list
+        return ctx.render(request, "_orders_sync_status.html", headers=headers, watch=watch, **context)
+
     @router.get("/orders", response_class=HTMLResponse)
     def orders_page(request: Request, show: str = "all", msg: str | None = None):
         with ctx.db() as conn:
@@ -57,7 +77,7 @@ def build_order_router(ctx: AppContext) -> APIRouter:
             spare=spare,
             unparsed=unparsed,
             email_counts=email_counts,
-            last=(ctx.kv.get("last_sync") or {}).get("orders"),
+            sync=sync_context(),
             senders=orders.senders(ctx),
         )
 

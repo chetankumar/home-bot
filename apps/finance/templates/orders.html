@@ -3,6 +3,8 @@
 <div class="card-head">
   <h1>Amazon orders</h1>
   <div class="row">
+    {% set connected, running, run, last = sync.connected, sync.running, sync.run, sync.last %}
+    {% include "_orders_sync_status.html" %}
     <form method="post" action="{{ app_url('/orders/match') }}"><button class="small">Match now</button></form>
     <a class="button secondary small" href="{{ app_url('/orders') }}{{ '' if show == 'unmatched' else '?show=unmatched' }}">{{ "Show all" if show == "unmatched" else "Only unmatched" }}</a>
   </div>

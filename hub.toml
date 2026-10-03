@@ -59,6 +59,7 @@ local = "lmstudio:qwen2.5-7b-instruct"
 # Finance settings (all optional):
 # [apps.finance]
 # sync_cron = "15 7 * * *"        # daily sync time, in the hub timezone
+# orders_cron = "45 19 * * *"      # evening Amazon order scan (also the Orders page button)
 # amazon_backfill_days = 90        # how far back the first Amazon order scan looks
 
 # Finance may only use local model servers, never a cloud provider.

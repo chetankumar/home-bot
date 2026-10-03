@@ -428,3 +428,89 @@ def test_one_unreadable_bank_alert_does_not_stop_the_sync(fin, monkeypatch):  # 
     row = rows(fin, "SELECT status, error FROM emails WHERE gmail_id = 'b2'")[0]
     assert row["status"] == "unparsed" and "parser blew up" in row["error"]
     assert count(fin.ctx, "SELECT COUNT(*) FROM transactions") == 1
+
+
+# -- the Orders page's own sync -----------------------------------------------------------------------------
+def wait_idle(fin, job="orders"):  # noqa: F811
+    import time
+
+    for _ in range(300):
+        if not fin.ctx.scheduler.is_running(job):
+            return
+        time.sleep(0.01)
+    raise AssertionError("job did not finish")
+
+
+def test_orders_have_their_own_scheduled_job(fin):  # noqa: F811
+    jobs = {j["job_id"]: j for j in fin.app.state.hub.scheduler.jobs() if j["app_id"] == "finance"}
+    assert set(jobs) == {"sync", "orders"}
+    assert "hour='19'" in jobs["orders"]["trigger"] and "minute='45'" in jobs["orders"]["trigger"]
+
+
+def test_orders_job_scans_amazon_only_and_remembers_the_result(fin):  # noqa: F811
+    add_txn(fin, 2, 450)
+    add_amazon(fin, "a1", "ordered_single_rs.txt", at(1, 9))
+    subject, body = fixture_email("upi_debit.txt")
+    fin.gmail.add("bank1", body, at(2, 9), subject=subject)
+    assert fin.ctx.scheduler.run_now("orders", wait=True)
+    assert [q for q in fin.gmail.queries if "hdfcbank" in q] == []  # no bank mail touched
+    assert count(fin.ctx, "SELECT COUNT(*) FROM emails") == 0
+    assert fin.ctx.scheduler.last_run("orders")["status"] == "ok"
+    last = fin.ctx.kv.get("last_orders_sync")
+    assert (last["new"], last["parsed"], last["matched"]) == (1, 1, 1)
+
+
+def test_orders_sync_button_shows_live_status_then_refreshes(fin):  # noqa: F811
+    import threading
+
+    client = login(TestClient(fin.app))
+    gate = threading.Event()
+    real = fin.gmail.search
+    fin.gmail.search = lambda q, limit=2000: (gate.wait(5), real(q, limit))[1]
+    add_amazon(fin, "a1", "ordered_single_rs.txt", at(1, 9))
+
+    page = client.get(f"{BASE}/orders").text
+    assert "Sync orders" in page and 'hx-post="/apps/finance/orders/sync"' in page
+    r = client.post(f"{BASE}/orders/sync")
+    assert "Syncing orders…" in r.text and "every 2s" in r.text  # polling while it runs
+    assert "HX-Refresh" not in r.headers
+    assert client.post(f"{BASE}/orders/sync").text.count("every 2s") == 1  # a second click doesn't start another
+    gate.set()
+    wait_idle(fin)
+    done = client.get(f"{BASE}/orders/sync/status?watch=1")
+    assert done.headers["HX-Refresh"] == "true" and "every 2s" not in done.text
+    assert "1 new email(s)" in client.get(f"{BASE}/orders").text
+    assert count(fin.ctx, "SELECT COUNT(*) FROM orders") == 1
+
+
+def test_orders_sync_failure_is_recorded_and_shown(fin):  # noqa: F811
+    client = login(TestClient(fin.app))
+
+    def boom(q, limit=2000):
+        raise RuntimeError("gmail is down")
+
+    fin.gmail.search = boom
+    client.post(f"{BASE}/orders/sync")
+    wait_idle(fin)
+    run = fin.ctx.scheduler.last_run("orders")
+    assert run["status"] == "error" and "gmail is down" in run["error"]
+    assert fin.ctx.kv.get("last_orders_sync")["error"] == "gmail is down"
+    assert "gmail is down" in client.get(f"{BASE}/orders").text
+
+
+def test_orders_sync_needs_gmail_connected(fin):  # noqa: F811
+    client = login(TestClient(fin.app))
+    fin.gmail.connected = False
+    html = client.get(f"{BASE}/orders").text
+    assert "Gmail not connected" in html and "Sync orders" not in html
+    client.post(f"{BASE}/orders/sync")
+    assert fin.ctx.scheduler.last_run("orders") is None  # nothing was started
+
+
+def test_orders_cron_is_configurable(hub_app):
+    from tests.conftest import BASE_TOML
+
+    toml = {**BASE_TOML, "apps": {**BASE_TOML["apps"], "finance": {**BASE_TOML["apps"]["finance"], "orders_cron": "5 6 * * *"}}}
+    app = hub_app(toml=toml)
+    job = next(j for j in app.state.hub.scheduler.jobs() if j["id"] == "finance:orders")
+    assert "hour='6'" in job["trigger"] and "minute='5'" in job["trigger"]
