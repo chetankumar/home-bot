@@ -229,15 +229,37 @@ redirect URI.
    `auto-confirm@amazon.in` (change the senders in Settings) and keeps the
    items, total and status (placed, shipped, delivered, cancelled) on
    **Orders**. Every order is then matched to the Amazon charge in your bank
-   alerts: same amount, charged from one day before to 14 days after the
-   order. A match shows the items on the transaction and pre-fills the
-   narration, so one click files it. Matching is cautious:
-   - an order and a charge that fit only each other match as **exact**;
-   - when two orders share an amount, the closest dates pair up and are marked
-     **check**;
-   - an order charged in two or three shipments matches all of them as a group;
+   alerts. The strongest signal is **timing**: your bank's alert and Amazon's
+   order email reach your inbox within minutes of each other. A match shows
+   the items on the transaction and pre-fills the narration, so one click
+   files it, and says why it matched ("same amount, 2 min apart"). Matching is
+   cautious, strongest first:
+   - the **same amount within 30 minutes** (or a unique same-amount pairing
+     within 1 day before to 14 days after) is **exact**;
+   - when several orders share an amount, the closest in time wins and the
+     match is marked **check**;
+   - an order with **no total** still matches if exactly one charge lands within
+     30 minutes of it and the amount is plausible (within ₹150 or 25% of the
+     item prices, to allow for delivery fees and coupons); it is marked **check**
+     and says how far the amount is off. If two orders compete for one charge
+     it is left for you rather than guessed;
+   - an order charged in two or three shipments, or a charge equal to some of
+     the items, matches as a group;
    - cancelled orders never match, and a cancellation frees an earlier match;
    - anything else stays unmatched; you can **link** or **unlink** by hand.
+
+   When an email has no total line, the total is estimated from the item
+   prices (shown as "≈", and replaced if a later email states the real one).
+   **view email** on such an order shows what was stored, in case the layout
+   needs a parser tweak. The window is `amazon_match_minutes` (default 30) and
+   the amount slack is `amazon_amount_slack` in rupees (default 150), both under
+   `[apps.finance]` in `hub.toml`.
+
+   **Older orders need older bank alerts.** The first sync only reads bank
+   alerts from the 1st of the current month, so an order from before that has no
+   charge to match. In **Settings → Fetch older bank alerts** pick a date and
+   click **Fetch & sync**: it reaches back once (alerts already stored are
+   skipped), and the Amazon scan reaches back with it.
 
    Orders have their own **Sync orders** button on the Orders page, with live
    status, so you can refresh them without re-reading your bank alerts. They are

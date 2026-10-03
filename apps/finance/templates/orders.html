@@ -10,7 +10,7 @@
   </div>
 </div>
 {% if msg %}{{ ui.flash(msg, "good") }}{% endif %}
-<p class="muted">Order emails from {{ senders | join(", ") }} are read on each sync, then matched to the Amazon charges in your bank alerts by amount and date. Items show on the matching transaction.</p>
+<p class="muted">Order emails from {{ senders | join(", ") }} are read on each sync, then matched to the Amazon charges in your bank alerts, mainly by timing (the two emails arrive minutes apart) and by amount. Items show on the matching transaction.</p>
 
 {% call ui.stats() %}
   {{ ui.stat_card("Orders", n_orders) }}
@@ -33,19 +33,26 @@
         <div>{{ i.title }}{% if i.quantity > 1 %} <span class="muted">× {{ i.quantity }}</span>{% endif %}{% if i.price_paise %} <span class="muted">{{ i.price_paise | inr }}</span>{% endif %}</div>
       {% else %}<span class="muted">items unknown</span>{% endfor %}
     </td>
-    <td class="num">{{ o.total_paise | inr if o.total_paise else "—" }}</td>
+    <td class="num">
+      {% if o.total_paise %}{{ "≈ " if o.total_source == "items" }}{{ o.total_paise | inr }}
+        {% if o.total_source == "items" %}<div class="muted">estimated from item prices</div>
+        {% elif o.total_source == "ai" %}<div class="muted">read by the local model</div>{% endif %}
+      {% else %}—{% endif %}
+      {% if o.email_body %}<details><summary class="muted">view email</summary><pre class="trace">{{ o.email_body }}</pre></details>{% endif %}
+    </td>
     <td>
       {% for t in o.paid %}
         <div>{{ t.occurred_at[:10] }} · {{ t.amount_paise | inr }}
-          {% if t.order_match == "ambiguous" %}{{ ui.badge("check: same amount as another order", "warn") }}
-          {% elif t.order_match == "split" %}{{ ui.badge("one of several charges", "info") }}
-          {% elif t.order_match == "manual" %}{{ ui.badge("linked by you") }}{% endif %}</div>
+          {% if t.order_match == "ambiguous" %}{{ ui.badge("check this match", "warn") }}
+          {% elif t.order_match == "split" %}{{ ui.badge("part of the order", "info") }}
+          {% elif t.order_match == "manual" %}{{ ui.badge("linked by you") }}{% endif %}
+          {% if t.order_match_note %}<div class="muted">{{ t.order_match_note }}</div>{% endif %}</div>
       {% endfor %}
       {% if o.paid %}
         <form method="post" action="{{ app_url('/orders/' ~ o.id ~ '/unlink') }}"><button class="small secondary">Unlink</button></form>
       {% elif o.status == "cancelled" %}<span class="muted">cancelled: no charge expected</span>
-      {% elif not o.total_paise %}<span class="muted">total unknown, so it can't be matched</span>
       {% elif o.before_history %}<span class="muted">before your synced bank history</span>
+        <div class="muted">Fetch older bank alerts in <a href="{{ app_url('/settings') }}">Settings</a>, then Match now.</div>
       {% else %}
         <span class="muted">no matching charge yet</span>
         {% if spare %}

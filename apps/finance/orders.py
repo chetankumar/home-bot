@@ -14,7 +14,7 @@ from typing import Any
 from hub.plugin import AppContext
 
 from . import amazon, matching
-from .sync import local_iso
+from .sync import backfill_start, local_iso
 
 JOB_ID = "orders"
 DEFAULT_SENDERS = ["auto-confirm@amazon.in"]
@@ -29,10 +29,12 @@ def since(ctx: AppContext, conn: sqlite3.Connection, now: datetime) -> datetime:
     """First run: `amazon_backfill_days` back (default 90). Later: newest email minus a day."""
     row = conn.execute("SELECT MAX(received_at) FROM order_emails").fetchone()
     if row and row[0]:
-        return datetime.fromisoformat(row[0]).replace(tzinfo=ctx.tz) - timedelta(days=1)
-    days = int(ctx.config.get("amazon_backfill_days", DEFAULT_BACKFILL_DAYS))
-    start = now.astimezone(ctx.tz) - timedelta(days=days)
-    return start.replace(hour=0, minute=0, second=0, microsecond=0)
+        start = datetime.fromisoformat(row[0]).replace(tzinfo=ctx.tz) - timedelta(days=1)
+    else:
+        days = int(ctx.config.get("amazon_backfill_days", DEFAULT_BACKFILL_DAYS))
+        start = (now.astimezone(ctx.tz) - timedelta(days=days)).replace(hour=0, minute=0, second=0, microsecond=0)
+    backfill = backfill_start(ctx)  # a pending Settings backfill reaches back for orders too
+    return min(start, backfill) if backfill else start
 
 
 def upsert_order(conn: sqlite3.Connection, parsed: amazon.ParsedOrder, received_at: str) -> int:
@@ -40,15 +42,20 @@ def upsert_order(conn: sqlite3.Connection, parsed: amazon.ParsedOrder, received_
     row = conn.execute("SELECT * FROM orders WHERE order_number = ?", (parsed.order_number,)).fetchone()
     if row is None:
         oid = conn.execute(
-            "INSERT INTO orders(order_number, ordered_at, total_paise, status) VALUES (?, ?, ?, ?)",
-            (parsed.order_number, received_at, parsed.total_paise, parsed.status),
+            "INSERT INTO orders(order_number, ordered_at, total_paise, total_source, status)"
+            " VALUES (?, ?, ?, ?, ?)",
+            (parsed.order_number, received_at, parsed.total_paise, parsed.total_source, parsed.status),
         ).lastrowid
     else:
         oid = row["id"]
+        total, source = row["total_paise"], row["total_source"]
+        # A real total (from the email or the model) replaces an estimate, never the reverse.
+        if parsed.total_paise is not None and (total is None or source == "items"):
+            total, source = parsed.total_paise, parsed.total_source
         conn.execute(
-            "UPDATE orders SET ordered_at = MIN(ordered_at, ?), total_paise = COALESCE(total_paise, ?),"
+            "UPDATE orders SET ordered_at = MIN(ordered_at, ?), total_paise = ?, total_source = ?,"
             " status = ? WHERE id = ?",
-            (received_at, parsed.total_paise, amazon.merge_status(row["status"], parsed.status), oid),
+            (received_at, total, source, amazon.merge_status(row["status"], parsed.status), oid),
         )
     # Items: keep the fullest list seen. A shipped email naming one item must not
     # replace a confirmation that listed three.
@@ -59,6 +66,16 @@ def upsert_order(conn: sqlite3.Connection, parsed: amazon.ParsedOrder, received_
             "INSERT INTO order_items(order_id, title, quantity, price_paise) VALUES (?, ?, ?, ?)",
             [(oid, i.title, i.quantity, i.price_paise) for i in parsed.items],
         )
+    # No total anywhere? Estimate it from the item prices so amount matching can use it.
+    row = conn.execute("SELECT total_paise FROM orders WHERE id = ?", (oid,)).fetchone()
+    if row["total_paise"] is None:
+        stored = [
+            amazon.OrderItem(i["title"], i["quantity"], i["price_paise"])
+            for i in conn.execute("SELECT * FROM order_items WHERE order_id = ?", (oid,))
+        ]
+        estimate = amazon.estimate_total(stored)
+        if estimate is not None:
+            conn.execute("UPDATE orders SET total_paise = ?, total_source = 'items' WHERE id = ?", (estimate, oid))
     if parsed.status == "cancelled":
         matching.unlink(conn, oid)  # a cancelled order shouldn't keep a payment
     return oid
@@ -155,7 +172,7 @@ def _scan(ctx: AppContext, now: datetime) -> dict[str, int]:
                 stats["new"] += 1
                 stats[process_email(ctx, conn, msg.id)] += 1
     with ctx.db() as conn:
-        stats["matched"] = matching.match_orders(conn).total
+        stats["matched"] = matching.match_orders(conn, **matching.window_settings(ctx.config)).total
     return stats
 
 
@@ -169,5 +186,5 @@ def reparse(ctx: AppContext, use_ai: bool = True) -> dict[str, int]:
         with ctx.db() as conn:
             stats[process_email(ctx, conn, gid, use_ai)] += 1
     with ctx.db() as conn:
-        stats["matched"] = matching.match_orders(conn).total
+        stats["matched"] = matching.match_orders(conn, **matching.window_settings(ctx.config)).total
     return stats

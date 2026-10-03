@@ -19,6 +19,15 @@
     <button>Save</button>
   </form>
   {% endcall %}
+  {% call ui.card("Fetch older bank alerts") %}
+    <p class="muted">The first sync only reads bank alerts from the 1st of the current month, so older Amazon orders have nothing to match. Fetch further back once; alerts already stored are skipped.</p>
+    {% if backfill_error %}{{ ui.flash(backfill_error, "bad") }}{% endif %}
+    {% if backfill_pending %}{{ ui.flash("A backfill from " ~ backfill_pending ~ " will run on the next sync.", "info") }}{% endif %}
+    <form method="post" action="{{ app_url('/settings/backfill') }}" class="row">
+      <label>From <input type="date" name="from_date" value="{{ backfill_default }}" required></label>
+      <button {{ "disabled" if not connected }}>Fetch &amp; sync</button>
+    </form>
+  {% endcall %}
   {% call ui.card("Status") %}
     <p>Gmail: {% if connected %}{{ ui.badge("connected", "good") }}{% else %}{{ ui.badge("not connected", "warn") }} <a href="/connections">Connect</a>{% endif %}</p>
     <p>Local model: <code>{{ local_model }}</code>

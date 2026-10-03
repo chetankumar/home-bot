@@ -47,7 +47,7 @@ def build_order_router(ctx: AppContext) -> APIRouter:
                 items.setdefault(i["order_id"], []).append(dict(i))
             paid: dict[int, list[dict]] = {}
             for t in conn.execute(
-                "SELECT id, order_id, occurred_at, amount_paise, order_match, counterparty_raw"
+                "SELECT id, order_id, occurred_at, amount_paise, order_match, order_match_note, counterparty_raw"
                 " FROM transactions WHERE order_id IS NOT NULL ORDER BY occurred_at"
             ):
                 paid.setdefault(t["order_id"], []).append(dict(t))
@@ -57,10 +57,19 @@ def build_order_router(ctx: AppContext) -> APIRouter:
             unparsed = [dict(r) for r in conn.execute(
                 "SELECT * FROM order_emails WHERE status = 'unparsed' ORDER BY received_at DESC LIMIT 50")]
             email_counts = dict(conn.execute("SELECT status, COUNT(*) FROM order_emails GROUP BY status").fetchall())
+            for o in rows:  # let the user see what the parser saw when the total isn't from the email
+                o["email_body"] = None
+                if o["total_source"] != "email":
+                    body = conn.execute(
+                        "SELECT body FROM order_emails WHERE body LIKE ? ORDER BY received_at LIMIT 1",
+                        (f"%{o['order_number']}%",),
+                    ).fetchone()
+                    o["email_body"] = body["body"] if body else None
         for o in rows:
             o["lines"] = items.get(o["id"], [])
             o["paid"] = paid.get(o["id"], [])
             o["before_history"] = bool(history_start) and o["ordered_at"][:10] < history_start[:10]
+
         matched = sum(1 for o in rows if o["paid"])
         # an order that can still be matched: has a total, isn't cancelled, nothing linked
         open_ = [o for o in rows if not o["paid"] and o["total_paise"] and o["status"] != "cancelled"]
@@ -84,7 +93,7 @@ def build_order_router(ctx: AppContext) -> APIRouter:
     @router.post("/orders/match")
     def match_now():
         with ctx.db() as conn:
-            r = matching.match_orders(conn)
+            r = matching.match_orders(conn, **matching.window_settings(ctx.config))
         text = (
             f"Matched {r.total} order(s): {r.exact} exact, {r.ambiguous} ambiguous, {r.split} split."
             if r.total else "No new matches."
