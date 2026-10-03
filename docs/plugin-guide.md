@@ -154,7 +154,7 @@ apps/<id>/
   - list it, pinned, in `apps/<id>/requirements.txt`;
   - mention it in your plugin's docstring.
 
-  Whoever installs the plugin runs `pip install -r apps/<id>/requirements.txt`
+  Whoever installs the plugin runs `python -m pip install -r apps/<id>/requirements.txt`
   (see [installation.md](installation.md#part-2-install-a-plugin)). The hub
   does not install packages itself. A missing package shows up as a
   `ModuleNotFoundError` on `/admin`, and only your plugin fails.

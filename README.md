@@ -25,7 +25,7 @@ migrations run, upgrades and backups. The short version:
 ```bash
 git clone https://github.com/chetankumar/home-bot.git && cd home-bot
 conda create -n home-hub python=3.12 -y && conda activate home-hub
-pip install -r requirements.txt
+python -m pip install -r requirements.txt
 copy .env.example .env      # cp on macOS/Linux; then set HUB_PASSWORD
 python -m uvicorn hub.main:app --host 0.0.0.0 --port 8000
 ```
@@ -36,7 +36,7 @@ Or, with [uv](https://docs.astral.sh/uv/): `uv sync`, then
 Open http://localhost:8000 and log in with `HUB_PASSWORD`. From other devices
 on the LAN, use `http://<host-ip>:8000`.
 
-Run the tests with `pip install -r requirements-dev.txt`, then
+Run the tests with `python -m pip install -r requirements-dev.txt`, then
 `python -m pytest` (or `uv run pytest`).
 
 ### Configuration
