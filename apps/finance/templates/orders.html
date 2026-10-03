@@ -71,7 +71,7 @@
   <button class="small secondary">Re-parse</button>
 </form>
 {% for e in unparsed %}
-  <details><summary>{{ e.received_at[:10] }} · {{ e.subject }}</summary><pre class="trace">{{ e.body }}</pre></details>
+  <details><summary>{{ e.received_at[:10] }} · {{ e.subject }}{% if e.error %} <span class="muted">· {{ e.error }}</span>{% endif %}</summary><pre class="trace">{{ e.body }}</pre></details>
 {% endfor %}
 {% endcall %}
 {% endif %}

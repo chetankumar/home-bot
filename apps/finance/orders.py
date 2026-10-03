@@ -63,7 +63,27 @@ def upsert_order(conn: sqlite3.Connection, parsed: amazon.ParsedOrder, received_
 
 
 def process_email(ctx: AppContext, conn: sqlite3.Connection, gmail_id: str, use_ai: bool = True) -> str:
-    """Parse one stored email and record the outcome. Returns its new status."""
+    """Parse one stored email and record the outcome. Returns its new status.
+
+    A failure while handling this email is contained: its changes are undone, it is kept
+    as 'unparsed' with the error for the Orders page, and the scan carries on.
+    """
+    conn.execute("SAVEPOINT process_email")
+    try:
+        status = _process_email(ctx, conn, gmail_id, use_ai)
+    except Exception as e:
+        conn.execute("ROLLBACK TO process_email")
+        ctx.log.exception("amazon: could not read email %s", gmail_id)
+        conn.execute(
+            "UPDATE order_emails SET status = 'unparsed', parser = NULL, error = ? WHERE gmail_id = ?",
+            (f"{type(e).__name__}: {e}", gmail_id),
+        )
+        status = "unparsed"
+    conn.execute("RELEASE process_email")
+    return status
+
+
+def _process_email(ctx: AppContext, conn: sqlite3.Connection, gmail_id: str, use_ai: bool) -> str:
     row = conn.execute("SELECT * FROM order_emails WHERE gmail_id = ?", (gmail_id,)).fetchone()
     parsed: Any = amazon.parse_email(row["subject"], row["body"])
     parser = parsed.parser if isinstance(parsed, amazon.ParsedOrder) else None

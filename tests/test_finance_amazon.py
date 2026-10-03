@@ -359,3 +359,72 @@ def test_migration_003_upgrades_a_database_with_data(tmp_path):
     with db() as conn:
         t = conn.execute("SELECT amount_paise, narration, order_id, order_match FROM transactions").fetchone()
     assert tuple(t) == (5000, "kept", None, None)
+
+
+# -- regression: a stray "rs ," in an email crashed the whole scan --------------------------------------
+STRAY = """Hello Test User, your order 402-9999999-8888888 is confirmed.
+
+Order #
+402-9999999-8888888
+
+Boat Headphones
+Quantity: 1
+Sold by cloudtail, rs , seller of record
+₹799.00
+
+Order Total: ₹799.00
+"""
+
+
+def test_stray_currency_lookalikes_are_not_amounts():
+    assert amazon.MONEY.search("many orders , rs , ok") is None
+    assert amazon.MONEY.search("Total: Rs , please") is None
+    assert amazon.MONEY.search("Price ₹1,299.50").group(1) == "1,299.50"
+    assert amazon.MONEY.search("INR 450").group(1) == "450"
+    o = amazon.parse_email("Ordered: \"Boat Headphones\"", STRAY)
+    assert (o.total_paise, [(i.title, i.price_paise) for i in o.items]) == (79900, [("Boat Headphones", 79900)])
+
+
+def test_one_unreadable_email_does_not_stop_the_scan(fin, monkeypatch):  # noqa: F811
+    import hub_apps.finance.amazon as amazon_mod
+
+    add_amazon(fin, "good1", "ordered_single_rs.txt", at(1, 9))
+    fin.gmail.add("bad", STRAY, at(2, 9), subject='Ordered: "Poison"', sender=SENDER)
+    add_amazon(fin, "good2", "ordered_two_items.txt", at(3, 9))
+    real = amazon_mod.parse_email
+
+    def parse(subject, body):
+        if "Poison" in subject:
+            raise ValueError("bad amount ','")
+        return real(subject, body)
+
+    monkeypatch.setattr(amazon_mod, "parse_email", parse)
+    result = fin.sync.run_sync(fin.ctx, now=at(4))["orders"]
+    assert "error" not in result and (result["new"], result["parsed"], result["unparsed"]) == (3, 2, 1)
+    assert count(fin.ctx, "SELECT COUNT(*) FROM orders") == 2  # both good orders were saved
+    bad = rows(fin, "SELECT status, error FROM order_emails WHERE gmail_id = 'bad'")[0]
+    assert bad["status"] == "unparsed" and "ValueError: bad amount" in bad["error"]
+    assert fin.sync.run_sync(fin.ctx, now=at(5))["orders"]["new"] == 0  # and the next sync is fine
+    html = login(TestClient(fin.app)).get(f"{BASE}/orders").text
+    assert "Poison" in html and "bad amount" in html  # visible for review, with the reason
+
+
+def test_one_unreadable_bank_alert_does_not_stop_the_sync(fin, monkeypatch):  # noqa: F811
+    import hub_apps.finance.sync as sync_mod
+
+    for i, (mid, name) in enumerate([("b1", "upi_debit.txt"), ("b2", "credit_card_v1.txt")]):
+        subject, body = fixture_email(name)
+        fin.gmail.add(mid, body, at(1 + i, 9), subject=subject)
+    real = sync_mod.parse_email
+
+    def parse(subject, body):
+        if "Credit Card" in body:
+            raise RuntimeError("parser blew up")
+        return real(subject, body)
+
+    monkeypatch.setattr(sync_mod, "parse_email", parse)
+    result = fin.sync.run_sync(fin.ctx, now=at(3))
+    assert (result["new"], result["parsed"], result["unparsed"]) == (2, 1, 1)
+    row = rows(fin, "SELECT status, error FROM emails WHERE gmail_id = 'b2'")[0]
+    assert row["status"] == "unparsed" and "parser blew up" in row["error"]
+    assert count(fin.ctx, "SELECT COUNT(*) FROM transactions") == 1
