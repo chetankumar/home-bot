@@ -1,0 +1,82 @@
+{% extends "base.html" %}
+{% import "components.html" as ui %}
+{% block content %}
+<h1>Admin</h1>
+
+{% call ui.card("Apps") %}
+<table>
+  <thead><tr><th>App</th><th>Status</th><th>Requires</th><th>Data</th></tr></thead>
+  <tbody>
+  {% for a in apps %}
+    <tr id="app-{{ a.id }}">
+      <td>{{ a.icon }} {{ a.name }} <span class="muted">{{ a.id }}</span></td>
+      <td>{{ ui.badge(a.status, {"loaded": "good", "failed": "bad", "disabled": "neutral"}[a.status]) }}</td>
+      <td>
+        {% if a.manifest %}
+          {% set missing = registry.missing_requirements(a) | map(attribute="name") | list %}
+          {% for r in a.manifest.requires %}{{ ui.badge(r, "warn" if r in missing else "good") }} {% else %}<span class="muted">—</span>{% endfor %}
+        {% endif %}
+      </td>
+      <td class="muted">{% if a.ctx %}data/apps/{{ a.id }}.db{% endif %}</td>
+    </tr>
+    {% if a.error %}<tr><td colspan="4"><pre class="trace">{{ a.error }}</pre></td></tr>{% endif %}
+  {% else %}
+    <tr><td colspan="4" class="muted">No apps discovered.</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% endcall %}
+
+{% call ui.card("Scheduled jobs") %}
+<table>
+  <thead><tr><th>Job</th><th>Trigger</th><th>Next run</th><th>Last run</th><th></th></tr></thead>
+  <tbody>
+  {% for j in jobs %}
+    <tr>
+      <td>{{ j.id }}</td>
+      <td class="muted">{{ j.trigger }}</td>
+      <td>{{ j.next_run | dt }}</td>
+      <td>{{ ui.job_status(j.last_run) }}
+        {% if j.last_run and j.last_run.error %}<details><summary>error</summary><pre class="trace">{{ j.last_run.error }}</pre></details>{% endif %}
+      </td>
+      <td><form method="post" action="/admin/jobs/{{ j.app_id }}/{{ j.job_id }}/run"><button class="small" {{ "disabled" if j.running }}>Run now</button></form></td>
+    </tr>
+  {% else %}
+    <tr><td colspan="5" class="muted">No jobs.</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% endcall %}
+
+{% call ui.card("AI usage by app") %}
+<p class="muted">
+  Providers:
+  {% for p in providers %}{{ ui.badge(p.name, "good" if p.available else "neutral") }} {% endfor %}
+  · Aliases: {% for k, v in aliases.items() %}<code>{{ k }} → {{ v }}</code> {% endfor %}
+</p>
+<table>
+  <thead><tr><th>App</th><th>Provider</th><th>Model</th><th class="num">Calls</th><th class="num">Errors</th><th class="num">Tokens in / out</th><th>Last used</th></tr></thead>
+  <tbody>
+  {% for u in usage %}
+    <tr>
+      <td>{{ u.app_id }}</td><td>{{ u.provider }}</td><td>{{ u.model }}</td>
+      <td class="num">{{ u.calls }}</td><td class="num">{{ u.errors }}</td>
+      <td class="num">{{ u.input_tokens or 0 }} / {{ u.output_tokens or 0 }}</td>
+      <td>{{ u.last_used | dt }}</td>
+    </tr>
+  {% else %}
+    <tr><td colspan="7" class="muted">No AI calls yet.</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% endcall %}
+
+{% call ui.card("Connections") %}
+<ul>
+{% for c in connections %}
+  <li>{{ c.label }}: {{ ui.badge("connected" if c.connected else ("not configured" if not c.configured else "not connected"), "good" if c.connected else "warn") }}
+    {% if c.account %}<span class="muted">{{ c.account }}</span>{% endif %} <a href="/connections">manage</a></li>
+{% endfor %}
+</ul>
+{% endcall %}
+{% endblock %}

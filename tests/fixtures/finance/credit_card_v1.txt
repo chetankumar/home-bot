@@ -1,0 +1,9 @@
+Subject: Alert : Update on your HDFC Bank Credit Card
+
+Dear Card Member,
+
+Thank you for using your HDFC Bank Credit Card ending 9876 for Rs 1299.00 at AMAZON PAY INDIA on 02-10-2026 21:14:05.
+
+Authorization code:- 012345
+
+After the above transaction, the available balance on your card is Rs 85000.00.

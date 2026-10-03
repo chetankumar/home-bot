@@ -1,0 +1,26 @@
+{% extends "finance_base.html" %}
+{% block content %}
+<h1>Settings</h1>
+{% if saved %}{{ ui.flash("Saved.", "good") }}{% endif %}
+<div class="columns">
+  {% call ui.card("Budget & senders") %}
+  <form method="post">
+    <label>Monthly budget (₹)
+      <input name="budget_rupees" inputmode="decimal" value="{{ (budget / 100) | round | int if budget else '' }}">
+    </label>
+    {% if hint %}<p class="muted">Trailing average of full past months: {{ hint | inr(false) }}</p>
+    {% else %}<p class="muted">Once a full past month is synced, its average shows here as a hint.</p>{% endif %}
+    <label>Alert sender addresses (one per line)
+      <textarea name="sender_list">{{ senders | join("\n") }}</textarea>
+    </label>
+    <button>Save</button>
+  </form>
+  {% endcall %}
+  {% call ui.card("Status") %}
+    <p>Gmail: {% if connected %}{{ ui.badge("connected", "good") }}{% else %}{{ ui.badge("not connected", "warn") }} <a href="/connections">Connect</a>{% endif %}</p>
+    <p>Local model: {% if ai_ready %}{{ ui.badge("configured", "good") }}{% else %}{{ ui.badge("unavailable", "warn") }}{% endif %}
+      <span class="muted">used only for alerts the regex parsers don't understand; restricted to Ollama by hub.toml</span></p>
+    <p>Daily sync: <code>{{ sync_cron }}</code> <span class="muted">(hub timezone; set <code>sync_cron</code> under <code>[apps.finance]</code> in hub.toml)</span></p>
+  {% endcall %}
+</div>
+{% endblock %}

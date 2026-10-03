@@ -1,0 +1,95 @@
+{% extends "finance_base.html" %}
+{% block content %}
+<h1>Recipients</h1>
+{% if saved %}{{ ui.flash("Saved " ~ saved ~ ".", "good") }}{% endif %}
+<datalist id="recipient-names">{% for r in known %}<option value="{{ r.name }}">{% endfor %}</datalist>
+
+{% call ui.card("Who is this?") %}
+<p class="muted">Unknown counterparties, biggest spend first. Naming one tags all its past transactions and every future one. Reuse an existing name to give that recipient another UPI id or merchant name.</p>
+{% if queue %}
+<table>
+  <thead><tr><th>Counterparty</th><th class="num">Spent</th><th>Name it</th></tr></thead>
+  <tbody>
+  {% for q in queue %}
+  <tr>
+    <td>
+      <div>{{ q.raw or q.key }}</div>
+      <div class="muted">{{ ui.badge(q.kind) }} <code>{{ q.key }}</code> · {{ q.n }}× · last {{ q.last_seen[:10] }}</div>
+    </td>
+    <td class="num">{{ q.total | inr(false) }}</td>
+    <td>
+      <form method="post" action="{{ app_url('/recipients') }}" class="row">
+        <input type="hidden" name="key" value="{{ q.key }}">
+        <input type="hidden" name="kind" value="{{ q.kind }}">
+        <input name="name" placeholder="Name" list="recipient-names" required size="14">
+        <span id="cat-{{ loop.index }}" class="row">
+          <select name="category_id" aria-label="Category">
+            <option value="">—</option>
+            {% for c in categories %}<option value="{{ c.id }}">{{ c.name }}</option>{% endfor %}
+          </select>
+          {% if ai_ready and q.kind == "merchant" %}
+          <button type="button" class="small secondary" hx-post="{{ app_url('/recipients/suggest') }}"
+                  hx-vals='{"key": {{ q.key | tojson }}, "raw": {{ (q.raw or "") | tojson }}}'
+                  hx-target="#cat-{{ loop.index }}" hx-swap="innerHTML">Suggest</button>
+          {% endif %}
+        </span>
+        <button class="small">Save</button>
+      </form>
+    </td>
+  </tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% else %}{{ ui.empty("Everyone is tagged. 🎉") }}{% endif %}
+{% endcall %}
+
+{% call ui.card("Known recipients") %}
+<form method="post" action="{{ app_url('/recipients') }}" class="row" style="margin-bottom: 1rem">
+  <label>Name <input name="name" list="recipient-names" required></label>
+  <label>UPI id or merchant <input name="key" placeholder="someone@okhdfcbank"></label>
+  <label>Category
+    <select name="category_id"><option value="">—</option>
+      {% for c in categories %}<option value="{{ c.id }}">{{ c.name }}</option>{% endfor %}
+    </select>
+  </label>
+  <button>Add</button>
+</form>
+{% if known %}
+<table>
+  <thead><tr><th>Recipient</th><th>Keys</th><th class="num">Spent (all time)</th><th></th></tr></thead>
+  <tbody>
+  {% for r in known %}
+  <tr>
+    <td>
+      <form method="post" action="{{ app_url('/recipients/' ~ r.id) }}" class="row">
+        <input name="name" value="{{ r.name }}" required size="14">
+        <select name="category_id" onchange="this.form.submit()"><option value="">—</option>
+          {% for c in categories %}<option value="{{ c.id }}" {{ "selected" if c.id == r.category_id }}>{{ c.name }}</option>{% endfor %}
+        </select>
+        <button class="small secondary">Save</button>
+      </form>
+    </td>
+    <td>
+      {% for k in keys.get(r.id, []) %}
+        <form method="post" action="{{ app_url('/keys/' ~ k.id ~ '/delete') }}" class="inline">
+          <code>{{ k.key }}</code><button class="link muted" title="Remove">✕</button>
+        </form>
+      {% endfor %}
+      <form method="post" action="{{ app_url('/recipients/' ~ r.id ~ '/keys') }}" class="row">
+        <input name="key" placeholder="add UPI id / merchant" size="16" required>
+        <button class="small secondary">+</button>
+      </form>
+    </td>
+    <td class="num">{{ r.total | inr(false) }} <span class="muted">({{ r.n }})</span></td>
+    <td>
+      <form method="post" action="{{ app_url('/recipients/' ~ r.id ~ '/delete') }}" onsubmit="return confirm('Delete {{ r.name }}? Its transactions become untagged.')">
+        <button class="small secondary">Delete</button>
+      </form>
+    </td>
+  </tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% else %}{{ ui.empty("No recipients yet.") }}{% endif %}
+{% endcall %}
+{% endblock %}

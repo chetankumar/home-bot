@@ -1,0 +1,34 @@
+{% extends "finance_base.html" %}
+{% block content %}
+<div class="card-head">
+  <h1>Review</h1>
+  <form method="post" action="{{ app_url('/review/reparse') }}" class="row">
+    <label class="row"><input type="checkbox" name="use_ai" value="1" checked> use local model</label>
+    <button class="secondary">Re-parse unparsed &amp; ignored</button>
+  </form>
+</div>
+<p class="muted">
+  {{ counts.get("parsed", 0) }} parsed · {{ counts.get("ignored", 0) }} ignored · {{ counts.get("unparsed", 0) }} unparsed.
+  Emails no parser (or the local model) could read land here.
+</p>
+{{ ui.flash(msg) }}
+{% for e in emails %}
+  {% call ui.card(e.subject or "(no subject)") %}
+    <p class="muted">{{ e.received_at | replace("T", " ") }} · {{ e.sender }}{% if e.error %} · {{ e.error }}{% endif %}</p>
+    <pre class="trace">{{ e.body }}</pre>
+    <form method="post" action="{{ app_url('/review/' ~ e.gmail_id ~ '/manual') }}" class="row">
+      <label>Amount ₹ <input name="amount" inputmode="decimal" required size="8"></label>
+      <label>Direction <select name="direction"><option>debit</option><option>credit</option></select></label>
+      <label>Via <select name="instrument">{% for i in instruments %}<option value="{{ i }}">{{ i | replace("_", " ") }}</option>{% endfor %}</select></label>
+      <label>Counterparty <input name="counterparty" size="16"></label>
+      <label>Date <input type="date" name="on" value="{{ e.received_at[:10] }}"></label>
+      <button>Save</button>
+    </form>
+    <form method="post" action="{{ app_url('/review/' ~ e.gmail_id ~ '/ignore') }}" style="margin-top: .5rem">
+      <button class="secondary small">Not a transaction — ignore</button>
+    </form>
+  {% endcall %}
+{% else %}
+  {{ ui.empty("Nothing to review.") }}
+{% endfor %}
+{% endblock %}

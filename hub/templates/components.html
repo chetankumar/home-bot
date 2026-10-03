@@ -1,0 +1,82 @@
+{# Shared UI pieces. In an app template:
+     {% import "components.html" as ui %}
+     {{ ui.stat_card("Spent", "₹12,300", sub="this month") }}
+#}
+
+{% macro stat_card(label, value, sub=None, tone=None) -%}
+<div class="stat {{ 'tone-' ~ tone if tone }}">
+  <div class="stat-label">{{ label }}</div>
+  <div class="stat-value">{{ value }}</div>
+  {% if sub %}<div class="stat-sub">{{ sub }}</div>{% endif %}
+</div>
+{%- endmacro %}
+
+{% macro stats() -%}
+<div class="stats">{{ caller() }}</div>
+{%- endmacro %}
+
+{% macro card(title=None, actions=None) -%}
+<section class="card">
+  {% if title or actions %}
+  <div class="card-head">
+    {% if title %}<h2>{{ title }}</h2>{% endif %}
+    {% if actions %}<div class="card-actions">{{ actions }}</div>{% endif %}
+  </div>
+  {% endif %}
+  {{ caller() }}
+</section>
+{%- endmacro %}
+
+{# items: list of (label, value_number, display_text); bars scale to the largest value #}
+{% macro bars(items, empty="Nothing yet.") -%}
+{% set top = (items | map(attribute=1) | max) if items else 0 %}
+{% if not items %}<p class="muted">{{ empty }}</p>{% else %}
+<ul class="bars">
+  {% for label, value, display in items %}
+  <li>
+    <span class="bar-label">{{ label }}</span>
+    <span class="bar-track"><span class="bar-fill" style="width: {{ (100 * value / top) | round(1) if top else 0 }}%"></span></span>
+    <span class="bar-value">{{ display }}</span>
+  </li>
+  {% endfor %}
+</ul>
+{% endif %}
+{%- endmacro %}
+
+{% macro meter(value, total, label=None) -%}
+{% set pct = (100 * value / total) if total else 0 %}
+<div class="meter {{ 'over' if pct > 100 }}" role="meter" aria-valuenow="{{ pct | round }}" aria-valuemin="0" aria-valuemax="100">
+  <span class="meter-fill" style="width: {{ [pct, 100] | min }}%"></span>
+</div>
+{% if label %}<div class="stat-sub">{{ label }}</div>{% endif %}
+{%- endmacro %}
+
+{% macro badge(text, tone="neutral") -%}
+<span class="badge tone-{{ tone }}">{{ text }}</span>
+{%- endmacro %}
+
+{% macro empty(text) -%}
+<p class="empty">{{ text }}</p>
+{%- endmacro %}
+
+{% macro flash(text, tone="info") -%}
+{% if text %}<div class="flash tone-{{ tone }}">{{ text }}</div>{% endif %}
+{%- endmacro %}
+
+{# run: a scheduler last_run() dict or None #}
+{% macro job_status(run) -%}
+{% if not run %}{{ badge("never run") }}
+{% elif run.status == "running" %}{{ badge("running…", "info") }}
+{% elif run.status == "ok" %}{{ badge("ok", "good") }} <span class="muted">{{ run.finished_at | dt }}</span>
+{% else %}{{ badge(run.status, "bad") }} <span class="muted">{{ run.finished_at | dt }}</span>
+{% endif %}
+{%- endmacro %}
+
+{# links: list of (href, label); current: request.url.path #}
+{% macro subnav(links, current) -%}
+<nav class="subnav container">
+  {% for href, label in links %}
+  <a href="{{ href }}" class="{{ 'active' if current == href or (href != links[0][0] and current.startswith(href)) }}">{{ label }}</a>
+  {% endfor %}
+</nav>
+{%- endmacro %}

@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}{% if app %}{{ app.name }} · {% endif %}Home Hub{% endblock %}</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🏠</text></svg>">
+  <link rel="stylesheet" href="/static/hub.css">
+  <script src="/static/htmx.min.js" defer></script>
+  {% block head %}{% endblock %}
+</head>
+<body hx-boost="false">
+  <header class="topbar">
+    <a class="brand" href="/">🏠 Home Hub</a>
+    <nav class="apps-nav">
+      {% for a in hub_nav() %}
+        <a href="/apps/{{ a.id }}/" class="{{ 'active' if request.url.path.startswith('/apps/' ~ a.id ~ '/') or request.url.path == '/apps/' ~ a.id }}"
+           title="{{ a.name }}">{{ a.icon }} <span>{{ a.name }}</span></a>
+      {% endfor %}
+    </nav>
+    <nav class="host-nav">
+      <a href="/connections">Connections</a>
+      <a href="/admin">Admin</a>
+      <form method="post" action="/logout"><button class="link">Log out</button></form>
+    </nav>
+  </header>
+  {% block subnav %}{% endblock %}
+  <main class="container">
+    {% block content %}{% endblock %}
+  </main>
+</body>
+</html>

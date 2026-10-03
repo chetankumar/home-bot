@@ -1,0 +1,12 @@
+Subject: ❗  You have done a UPI txn. Check details!
+
+Dear Customer,
+
+Rs.450.00 has been debited from account **4321 to VPA swiggy.stores@axisbank SWIGGY on 02-10-26.
+
+Your UPI transaction reference number is 527512345678.
+
+If you did not authorize this transaction, please report it immediately by calling 18002586161 Or SMS BLOCK UPI to 7308080808.
+
+Warm Regards,
+HDFC Bank

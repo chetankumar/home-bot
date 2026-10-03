@@ -1,0 +1,32 @@
+[project]
+name = "home-hub"
+version = "0.1.0"
+description = "A pluggable host for home-automation micro-apps"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.30",
+    "jinja2>=3.1",
+    "python-multipart>=0.0.9",
+    "itsdangerous>=2.2",
+    "pydantic>=2.7",
+    "pydantic-settings>=2.3",
+    "httpx>=0.27",
+    "apscheduler>=3.10,<4",
+    "cryptography>=42",
+    "anthropic>=0.40",
+    "openai>=1.40",
+    "google-genai>=1.0",
+    "tzdata>=2024.1",
+]
+
+[dependency-groups]
+dev = ["pytest>=8"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+
+[tool.uv]
+package = false

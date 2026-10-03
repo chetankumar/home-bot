@@ -218,3 +218,6 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Home Hub runtime data (databases, generated secret key)
+/data/

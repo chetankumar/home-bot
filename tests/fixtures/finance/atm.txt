@@ -1,0 +1,4 @@
+Subject: Cash withdrawal alert
+
+Dear Customer,
+Rs.2000.00 has been withdrawn from your account **4321 using Debit Card ending 5555 at ATM HDFC BANK KORAMANGALA on 03-10-26.
