@@ -22,7 +22,14 @@ ORDER_NO = re.compile(r"\b(\d{3}-\d{7}-\d{7})\b")
 CURRENCY = r"(?:₹|(?<![a-z])(?:rs\.?|inr))\s*"  # not the "rs" inside "orders"
 AMOUNT = r"(\d[\d,]*(?:\.\d{1,2})?)"  # starts with a digit: never a bare comma
 MONEY = re.compile(CURRENCY + AMOUNT, re.I)
+# Explicit order totals first; the looser patterns only if those find nothing. "Subtotal" and
+# "Item total"-style lines are not the amount charged, so they never match.
 TOTAL = re.compile(r"(?:order total|grand total|total amount|order value)\s*:?\s*" + CURRENCY + AMOUNT, re.I)
+TOTAL_LOOSE = re.compile(
+    r"(?:amount payable|amount to be paid|total payable|payment total|(?<![a-z])(?<!sub)total)\s*:?\s*"
+    + CURRENCY + AMOUNT,
+    re.I,
+)
 QTY = re.compile(r"^\s*(?:quantity|qty)\s*:?\s*(\d+)\s*$", re.I)
 SUBJECT = re.compile(r"^\s*(ordered|shipped|delivered|out for delivery|cancel\w*)\s*:?\s*(.*)$", re.I | re.S)
 MORE_ITEMS = re.compile(r"\s+and\s+\d+\s+more\s+items?\s*$", re.I)
@@ -47,6 +54,7 @@ class ParsedOrder:
     order_number: str
     status: str = "placed"  # placed | shipped | delivered | cancelled
     total_paise: int | None = None
+    total_source: str | None = None  # email | ai | items (estimated from item prices)
     items: list[OrderItem] = field(default_factory=list)
     parser: str = ""
 
@@ -98,8 +106,19 @@ def parse_items(body: str) -> list[OrderItem]:
 
 
 def parse_total(body: str) -> int | None:
-    m = TOTAL.search(body)
+    m = TOTAL.search(body) or TOTAL_LOOSE.search(body)
     return to_paise(m.group(1)) if m else None
+
+
+def estimate_total(items: list[OrderItem]) -> int | None:
+    """Sum of item prices, when every item has one and each is a single unit.
+
+    For quantity > 1 it is unclear whether the price is per unit or for the line, so no
+    estimate is made (timing can still match the order).
+    """
+    if not items or any(i.price_paise is None or i.quantity != 1 for i in items):
+        return None
+    return sum(i.price_paise for i in items)
 
 
 def parse_email(subject: str, body: str) -> ParsedOrder | str | None:
@@ -112,6 +131,7 @@ def parse_email(subject: str, body: str) -> ParsedOrder | str | None:
     order = ParsedOrder(order_number=m.group(1), status=status_from(subject, body))
     order.items = parse_items(body)
     order.total_paise = parse_total(body)
+    order.total_source = "email" if order.total_paise is not None else None
     order.parser = "body"
     if not order.items:
         title = subject_title(subject)
@@ -171,6 +191,7 @@ def ai_fill(ctx: AppContext, subject: str, body: str, order: ParsedOrder | None)
         ] or out.items
     if result.total and out.total_paise is None:
         out.total_paise = to_paise(f"{result.total:.2f}")
+        out.total_source = "ai"
     out.parser = "ai"
     return out
 

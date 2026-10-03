@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import sqlite3
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 
 from fastapi import APIRouter, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
@@ -18,7 +18,7 @@ from .order_routes import build_order_router
 from .queries import recipient_names, txn_rows
 from .parsers import Parsed, parse_date, to_paise
 from . import orders as orders_mod
-from .sync import JOB_ID, insert_transaction, reparse, senders
+from .sync import BACKFILL_KEY, JOB_ID, backfill_start, insert_transaction, reparse, senders
 
 INSTRUMENTS = ["upi", "credit_card", "debit_card", "netbanking", "atm"]
 
@@ -298,7 +298,7 @@ def build_router(ctx: AppContext) -> APIRouter:
 
     # -- settings -------------------------------------------------------------------------
     @router.get("/settings", response_class=HTMLResponse)
-    def settings_page(request: Request, saved: bool = False):
+    def settings_page(request: Request, saved: bool = False, error: str | None = None):
         with ctx.db() as conn:
             hint = stats.trailing_average(conn, today())
         return ctx.render(
@@ -313,7 +313,24 @@ def build_router(ctx: AppContext) -> APIRouter:
             ai_ready=ctx.ai.available(),
             local_model=local_model(),
             sync_cron=ctx.config.get("sync_cron", "15 7 * * *"),
+            backfill_default=(today() - timedelta(days=90)).isoformat(),
+            backfill_pending=pending.date().isoformat() if (pending := backfill_start(ctx)) else None,
+            backfill_error=error,
         )
+
+    @router.post("/settings/backfill")
+    def backfill(from_date: str = Form("")):
+        try:
+            d = date.fromisoformat(from_date)
+        except ValueError:
+            return back("/settings?error=Pick a date to fetch from.")
+        if d > today():
+            return back("/settings?error=That date is in the future.")
+        if not ctx.gmail.connected:
+            return back("/settings?error=Connect Gmail first.")
+        ctx.kv.set(BACKFILL_KEY, d.isoformat())
+        ctx.scheduler.run_now(JOB_ID)  # if one is already running, the backfill rides the next sync
+        return back("/")  # the dashboard shows the sync running
 
     @router.post("/settings")
     def save_settings(

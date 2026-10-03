@@ -32,6 +32,19 @@ def senders(ctx: AppContext) -> list[str]:
     return ctx.kv.get("senders") or list(DEFAULT_SENDERS)
 
 
+BACKFILL_KEY = "backfill_from"  # one-shot: an ISO date set from Settings, cleared after a sync
+
+
+def backfill_start(ctx: AppContext) -> datetime | None:
+    """The date a pending backfill reaches back to (start of that day, local), if any."""
+    raw = ctx.kv.get(BACKFILL_KEY)
+    try:
+        d = date.fromisoformat(raw) if raw else None
+    except ValueError:
+        return None
+    return datetime(d.year, d.month, d.day, tzinfo=ctx.tz) if d else None
+
+
 def sync_since(conn: sqlite3.Connection, tz: ZoneInfo, now: datetime) -> datetime:
     """First run: the 1st of this month (local). Later: newest email minus a day."""
     row = conn.execute("SELECT MAX(received_at) FROM emails").fetchone()
@@ -58,8 +71,12 @@ def run_sync(ctx: AppContext, now: datetime | None = None) -> dict[str, Any]:
     now = now or datetime.now(ctx.tz)
     stats: dict[str, Any] = {"fetched": 0, "new": 0, "parsed": 0, "ignored": 0, "unparsed": 0}
     try:
+        backfill = backfill_start(ctx)
         with ctx.db() as conn:
             since = sync_since(conn, ctx.tz, now)
+        if backfill and backfill < since:
+            since = backfill  # reach further back once; already-stored emails are skipped by id
+            stats["backfill_from"] = backfill.date().isoformat()
         ids = ctx.gmail.search(gmail_query(senders(ctx), since))
         stats["fetched"] = len(ids)
         with ctx.db() as conn:
@@ -81,6 +98,8 @@ def run_sync(ctx: AppContext, now: datetime | None = None) -> dict[str, Any]:
         if ai.error:
             stats["ai_error"] = ai.error
         stats["orders"] = amazon_step(ctx, now)
+        if backfill:
+            ctx.kv.delete(BACKFILL_KEY)  # done; the next sync goes back to its normal window
     except Exception as e:
         ctx.kv.set("last_sync", {**stats, "at": now.isoformat(timespec="seconds"), "error": str(e)})
         raise

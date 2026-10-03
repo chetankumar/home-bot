@@ -61,6 +61,8 @@ local = "lmstudio:qwen2.5-7b-instruct"
 # sync_cron = "15 7 * * *"        # daily sync time, in the hub timezone
 # orders_cron = "45 19 * * *"      # evening Amazon order scan (also the Orders page button)
 # amazon_backfill_days = 90        # how far back the first Amazon order scan looks
+# amazon_match_minutes = 30        # bank alert and order email count as "close" within this many minutes
+# amazon_amount_slack = 150        # rupees: how far a charge may differ from the item prices (fees, coupons)
 
 # Finance may only use local model servers, never a cloud provider.
 [apps.finance.ai]

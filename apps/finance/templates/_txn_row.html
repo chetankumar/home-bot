@@ -4,7 +4,7 @@
   <td>{{ t.occurred_at[:10] }}{% if t.occurred_at[11:16] != "00:00" %} <span class="muted">{{ t.occurred_at[11:16] }}</span>{% endif %}</td>
   <td>{{ t.counterparty_raw or "—" }}{% if t.source != "regex" %} <span class="badge">{{ t.source }}</span>{% endif %}
     {% if t.narration %}<div class="muted">“{{ t.narration }}”</div>{% endif %}
-    {% if t.order_summary %}<div class="muted" title="Amazon order {{ t.order_number }}">🛒 {{ t.order_summary }}
+    {% if t.order_summary %}<div class="muted" title="Amazon order {{ t.order_number }}{% if t.order_match_note %}: {{ t.order_match_note }}{% endif %}">🛒 {{ t.order_summary }}
       {% if t.order_match == "ambiguous" %}{{ ui.badge("check match", "warn") }}{% endif %}</div>{% endif %}
   </td>
   <td class="muted">{{ t.instrument | replace("_", " ") }}{% if t.account_mask %} ··{{ t.account_mask }}{% endif %}</td>
