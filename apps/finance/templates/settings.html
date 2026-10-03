@@ -13,6 +13,9 @@
     <label>Alert sender addresses (one per line)
       <textarea name="sender_list">{{ senders | join("\n") }}</textarea>
     </label>
+    <label>Amazon order-email senders (one per line)
+      <textarea name="amazon_sender_list">{{ amazon_senders | join("\n") }}</textarea>
+    </label>
     <button>Save</button>
   </form>
   {% endcall %}

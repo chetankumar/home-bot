@@ -1,0 +1,97 @@
+"""Amazon orders: the list, matching, and manual link/unlink."""
+
+from __future__ import annotations
+
+from urllib.parse import urlencode
+
+from fastapi import APIRouter, Form, HTTPException, Request
+from fastapi.responses import HTMLResponse, RedirectResponse
+
+from hub.plugin import AppContext
+
+from . import matching, orders
+
+
+def build_order_router(ctx: AppContext) -> APIRouter:
+    router = APIRouter()
+
+    def back(**params: str) -> RedirectResponse:
+        return RedirectResponse(ctx.url("/orders") + ("?" + urlencode(params) if params else ""), status_code=303)
+
+    @router.get("/orders", response_class=HTMLResponse)
+    def orders_page(request: Request, show: str = "all", msg: str | None = None):
+        with ctx.db() as conn:
+            rows = [dict(r) for r in conn.execute("SELECT * FROM orders ORDER BY ordered_at DESC, id DESC LIMIT 300")]
+            items: dict[int, list[dict]] = {}
+            for i in conn.execute("SELECT * FROM order_items ORDER BY id"):
+                items.setdefault(i["order_id"], []).append(dict(i))
+            paid: dict[int, list[dict]] = {}
+            for t in conn.execute(
+                "SELECT id, order_id, occurred_at, amount_paise, order_match, counterparty_raw"
+                " FROM transactions WHERE order_id IS NOT NULL ORDER BY occurred_at"
+            ):
+                paid.setdefault(t["order_id"], []).append(dict(t))
+            # Bank history starts at the oldest alert email synced, not at the first transaction.
+            history_start = conn.execute("SELECT MIN(received_at) FROM emails").fetchone()[0]
+            spare = [dict(t) for t in matching.candidate_transactions(conn)]
+            unparsed = [dict(r) for r in conn.execute(
+                "SELECT * FROM order_emails WHERE status = 'unparsed' ORDER BY received_at DESC LIMIT 50")]
+            email_counts = dict(conn.execute("SELECT status, COUNT(*) FROM order_emails GROUP BY status").fetchall())
+        for o in rows:
+            o["lines"] = items.get(o["id"], [])
+            o["paid"] = paid.get(o["id"], [])
+            o["before_history"] = bool(history_start) and o["ordered_at"][:10] < history_start[:10]
+        matched = sum(1 for o in rows if o["paid"])
+        # an order that can still be matched: has a total, isn't cancelled, nothing linked
+        open_ = [o for o in rows if not o["paid"] and o["total_paise"] and o["status"] != "cancelled"]
+        shown = [o for o in rows if not o["paid"]] if show == "unmatched" else rows
+        return ctx.render(
+            request,
+            "orders.html",
+            orders=shown,
+            show=show,
+            msg=msg,
+            n_orders=len(rows),
+            n_matched=matched,
+            n_open=len(open_),
+            spare=spare,
+            unparsed=unparsed,
+            email_counts=email_counts,
+            last=(ctx.kv.get("last_sync") or {}).get("orders"),
+            senders=orders.senders(ctx),
+        )
+
+    @router.post("/orders/match")
+    def match_now():
+        with ctx.db() as conn:
+            r = matching.match_orders(conn)
+        text = (
+            f"Matched {r.total} order(s): {r.exact} exact, {r.ambiguous} ambiguous, {r.split} split."
+            if r.total else "No new matches."
+        )
+        return back(msg=text)
+
+    @router.post("/orders/reparse")
+    def reparse(use_ai: str = Form("")):
+        r = orders.reparse(ctx, use_ai=bool(use_ai))
+        return back(msg=f"Re-parsed: {r['parsed']} parsed, {r['ignored']} ignored, {r['unparsed']} still unparsed; {r['matched']} new match(es).")
+
+    @router.post("/orders/{order_id}/unlink")
+    def unlink(order_id: int):
+        with ctx.db() as conn:
+            matching.unlink(conn, order_id)
+        return back(msg="Unlinked.")
+
+    @router.post("/orders/{order_id}/link")
+    def link(order_id: int, txn_id: str = Form("")):
+        try:
+            tid = int(txn_id)
+        except ValueError:
+            return back(msg="Pick a transaction to link.")
+        with ctx.db() as conn:
+            if conn.execute("SELECT 1 FROM orders WHERE id = ?", (order_id,)).fetchone() is None:
+                raise HTTPException(404)
+            matching.link_manually(conn, order_id, tid)
+        return back(msg="Linked.")
+
+    return router

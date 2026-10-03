@@ -1,0 +1,3 @@
+Subject: Ordered: "Mystery item"
+
+Something changed in Amazon's format and there is no order number here at all.

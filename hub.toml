@@ -56,6 +56,11 @@ local = "lmstudio:qwen2.5-7b-instruct"
 # AI policy is enforced by the host: a call to a provider outside
 # allowed_providers raises AIPolicyError before any network request.
 
+# Finance settings (all optional):
+# [apps.finance]
+# sync_cron = "15 7 * * *"        # daily sync time, in the hub timezone
+# amazon_backfill_days = 90        # how far back the first Amazon order scan looks
+
 # Finance may only use local model servers, never a cloud provider.
 [apps.finance.ai]
 allowed_providers = ["lmstudio", "ollama"]

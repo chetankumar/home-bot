@@ -83,6 +83,11 @@ def transaction_context(conn: sqlite3.Connection, txn_id: int) -> str:
     ]
     if t["counterparty_raw"]:
         parts.append(f"counterparty: {mask(t['counterparty_raw'])}")
+    if t["order_id"]:
+        titles = [r["title"] for r in conn.execute(
+            "SELECT title FROM order_items WHERE order_id = ? ORDER BY id LIMIT 8", (t["order_id"],))]
+        if titles:
+            parts.append("Amazon order items: " + " | ".join(x[:80] for x in titles))
     return "; ".join(parts)
 
 

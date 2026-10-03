@@ -14,6 +14,10 @@
         {{ last_sync.new }} new · {{ last_sync.parsed }} parsed · {{ last_sync.ignored }} ignored · {{ last_sync.unparsed }} to review
         {% endif %}
         {% if last_sync.ai_error %}· {{ last_sync.ai_error }}{% endif %}
+        {% if last_sync.orders %}
+          {% if last_sync.orders.error %}· Amazon: {{ last_sync.orders.error }}
+          {% else %}· Amazon: {{ last_sync.orders.new }} new email(s), {{ last_sync.orders.matched }} matched{% endif %}
+        {% endif %}
       </span>
     {% endif %}
   {% endif %}

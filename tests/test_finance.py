@@ -58,6 +58,7 @@ def test_sync_is_idempotent_and_classifies(fin):
     add_fixture(fin.gmail, "m2", "credit_card_v1.txt", at(2, 21))
     add_fixture(fin.gmail, "m3", "otp.txt", at(2, 21))
     result = fin.sync.run_sync(fin.ctx, now=at(3))
+    assert result.pop("orders")["fetched"] == 0  # no Amazon mail in this mailbox
     assert result == {"fetched": 3, "new": 3, "parsed": 2, "ignored": 1, "unparsed": 0}
 
     again = fin.sync.run_sync(fin.ctx, now=at(3))
@@ -66,7 +67,8 @@ def test_sync_is_idempotent_and_classifies(fin):
     assert count(fin.ctx, "SELECT COUNT(*) FROM emails") == 3
     assert count(fin.ctx, "SELECT COUNT(*) FROM transactions") == 2
     # later runs overlap by a day from the newest stored email
-    assert fin.gmail.queries[1].endswith(f"after:{int(datetime(2026, 10, 1, 21, tzinfo=IST).timestamp())}")
+    bank = [q for q in fin.gmail.queries if "hdfcbank" in q]
+    assert bank[1].endswith(f"after:{int(datetime(2026, 10, 1, 21, tzinfo=IST).timestamp())}")
     assert fin.ctx.kv.get("last_sync")["new"] == 0
 
 

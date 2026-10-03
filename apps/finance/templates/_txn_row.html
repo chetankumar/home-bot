@@ -4,6 +4,8 @@
   <td>{{ t.occurred_at[:10] }}{% if t.occurred_at[11:16] != "00:00" %} <span class="muted">{{ t.occurred_at[11:16] }}</span>{% endif %}</td>
   <td>{{ t.counterparty_raw or "—" }}{% if t.source != "regex" %} <span class="badge">{{ t.source }}</span>{% endif %}
     {% if t.narration %}<div class="muted">“{{ t.narration }}”</div>{% endif %}
+    {% if t.order_summary %}<div class="muted" title="Amazon order {{ t.order_number }}">🛒 {{ t.order_summary }}
+      {% if t.order_match == "ambiguous" %}{{ ui.badge("check match", "warn") }}{% endif %}</div>{% endif %}
   </td>
   <td class="muted">{{ t.instrument | replace("_", " ") }}{% if t.account_mask %} ··{{ t.account_mask }}{% endif %}</td>
   <td class="num" style="{{ 'color: var(--good)' if t.direction == 'credit' }}">{{ "+" if t.direction == "credit" }}{{ t.amount_paise | inr }}</td>
@@ -37,7 +39,7 @@
     </div>
     {% else %}
     <form class="row" hx-post="{{ url }}/narrate" hx-target="#txn-{{ t.id }}" hx-swap="outerHTML" hx-indicator="#spin-{{ t.id }}">
-      <input name="narration" value="{{ narration_text if narration_text is defined and narration_text else '' }}" maxlength="500" size="26"
+      <input name="narration" value="{{ narration_text if narration_text is defined and narration_text else (t.narration or t.order_summary or '') }}" maxlength="500" size="26"
              placeholder="What was this? e.g. weekly vegetables" aria-label="Describe this spend">
       <button class="small">Categorise</button>
       <span id="spin-{{ t.id }}" class="htmx-indicator muted">thinking…</span>

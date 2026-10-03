@@ -80,12 +80,24 @@ def run_sync(ctx: AppContext, now: datetime | None = None) -> dict[str, Any]:
                 stats[process_email(ctx, conn, msg.id, ai)] += 1
         if ai.error:
             stats["ai_error"] = ai.error
+        stats["orders"] = amazon_step(ctx, now)
     except Exception as e:
         ctx.kv.set("last_sync", {**stats, "at": now.isoformat(timespec="seconds"), "error": str(e)})
         raise
     ctx.kv.set("last_sync", {**stats, "at": now.isoformat(timespec="seconds")})
     ctx.log.info("sync done: %s", stats)
     return stats
+
+
+def amazon_step(ctx: AppContext, now: datetime) -> dict[str, Any]:
+    """Scan Amazon order emails and match them to payments. Never fails the bank sync."""
+    from .orders import sync_orders  # imported here: orders.py imports from this module
+
+    try:
+        return sync_orders(ctx, now)
+    except Exception as e:
+        ctx.log.exception("amazon order scan failed")
+        return {"error": str(e)}
 
 
 def process_email(
