@@ -1,0 +1,97 @@
+{# Progress chart (ctx.charts.progress). `chart` is the geometry from chart_render; `links` the optional toggle URLs. #}
+{% import "components.html" as ui %}
+{% set c = chart %}
+<section class="card viz-root progress-chart">
+  <div class="card-head">
+    <h2>{{ c.title }}</h2>
+    {% if links.climb or links.burn %}<div class="seg" role="group" aria-label="Chart view">
+      <a href="{{ links.climb }}" class="{{ 'active' if c.view == 'climb' }}" {{ 'aria-current=true' if c.view == 'climb' }}>Climb-up</a>
+      {% if c.has_limit and links.burn %}<a href="{{ links.burn }}" class="{{ 'active' if c.view == 'burn' }}" {{ 'aria-current=true' if c.view == 'burn' }}>Burn-down</a>
+      {% else %}<span class="disabled" title="Needs a {{ text.noun }}">Burn-down</span>{% endif %}
+    </div>{% endif %}
+  </div>
+
+  {% if c.view_fallback %}{{ ui.flash("Burn-down needs a " ~ text.noun ~ ". Set one first.", "warn") }}{% endif %}
+
+  {% if c.empty %}
+    {{ ui.empty(c.empty) }}
+  {% else %}
+  {% set sm = c.summary %}
+  <div class="flash tone-{{ sm.tone }} viz-note">
+    <span class="viz-icon" aria-hidden="true">{{ sm.icon }}</span>{{ sm.text }}
+    {% for n in sm.notes %}<div class="muted">{{ n }}</div>{% endfor %}
+  </div>
+
+  <div class="viz-legend" aria-label="Legend">
+    {% for l in c.legend %}
+      {% if l.key == "budget" %}<span><i class="viz-key s-ref" style="border-top-width:1.5px"></i>{{ l.name }}</span>
+      {% elif l.key == "needed" %}<span><i class="viz-key s-ref" style="border-top-style:dashed"></i>{{ l.name }}</span>
+      {% elif l.key == "actual" %}<span><i class="viz-key s1"></i>{{ text.total_name if c.view == "climb" else text.left_name }}</span>
+      {% else %}<span><i class="viz-key s{{ c.slot[l.key] }}" style="border-top-style:dashed"></i>{{ l.name }}</span>{% endif %}
+    {% endfor %}
+  </div>
+
+  <div class="viz-scroll">
+    <div class="viz-wrap">
+      <svg viewBox="0 0 {{ c.W }} {{ c.H }}" role="img" tabindex="0" data-chart="{{ c.data_json }}"
+           aria-label="{{ sm.text }} Use the arrow keys to read each day; the table view below has every value.">
+        <g class="viz-grid">
+          {% for t in c.y_ticks %}
+            <line class="{{ 'viz-zero' if t.zero and c.view == 'burn' }}" x1="{{ c.ML }}" x2="{{ c.W - c.MR }}" y1="{{ t.y }}" y2="{{ t.y }}"/>
+            <text x="{{ c.ML - 8 }}" y="{{ t.y | float + 4 }}" text-anchor="end">{{ t.label }}</text>
+          {% endfor %}
+        </g>
+        {% if c.y_unit %}<text x="{{ c.ML - 8 }}" y="{{ c.MT - 8 }}" text-anchor="end">{{ c.y_unit }}</text>{% endif %}
+        <line class="viz-axis" x1="{{ c.ML }}" x2="{{ c.W - c.MR }}" y1="{{ c.plot_bottom }}" y2="{{ c.plot_bottom }}"/>
+        {% for t in c.x_ticks %}<text x="{{ t.x }}" y="{{ c.plot_bottom + 18 }}" text-anchor="middle">{{ t.label }}</text>{% endfor %}
+
+        {% if c.ref_y and c.view == "climb" %}<line class="viz-ref" x1="{{ c.ML }}" x2="{{ c.W - c.MR }}" y1="{{ c.ref_y }}" y2="{{ c.ref_y }}"/>{% endif %}
+        {% if c.today_x %}
+          <line class="viz-today" x1="{{ c.today_x }}" x2="{{ c.today_x }}" y1="{{ c.MT }}" y2="{{ c.plot_bottom }}"/>
+          <text x="{{ c.today_x }}" y="{{ c.MT - 8 }}" text-anchor="{{ 'end' if c.today_x | float > c.W - 70 else 'middle' }}">Today</text>
+        {% endif %}
+
+        {% if c.area_d %}<path class="viz-area" d="{{ c.area_d }}"/>{% endif %}
+        {% for ln in c.lines %}
+          <path class="viz-line {{ 's-ref' if ln.key == 'needed' else 's' ~ c.slot[ln.key] }}" d="{{ ln.d }}" stroke-dasharray="{{ ln.dash }}"/>
+        {% endfor %}
+        <path class="viz-line s1" d="{{ c.actual_d }}"/>
+
+        {% for k in c.clips %}
+          <path class="viz-tri s{{ c.slot[k.key] }}" d="M{{ k.x }} {{ k.y + (-9 if k.up else 9) }} l-5 {{ 9 if k.up else -9 }} l10 0 z"/>
+          <text x="{{ k.x - 10 }}" y="{{ k.y + (14 if k.up else -8) + k.dy }}" text-anchor="end" class="viz-strong">{{ k.text }} by month-end</text>
+        {% endfor %}
+        {% for m in c.big_marks %}<path class="viz-big s1" d="M{{ m.x | float }} {{ m.y | float - 6 }} l5 6 l-5 6 l-5 -6 z"><title>Big payment</title></path>{% endfor %}
+        {% for dt in c.dots %}
+          <circle class="viz-ring" cx="{{ dt.x }}" cy="{{ dt.y }}" r="6"/>
+          <circle class="viz-dot s{{ c.slot[dt.key] }}" cx="{{ dt.x }}" cy="{{ dt.y }}" r="4"/>
+        {% endfor %}
+        {% for lb in c.labels %}<text class="viz-strong" x="{{ lb.x }}" y="{{ lb.y }}" text-anchor="{{ lb.anchor }}">{{ lb.text }}</text>{% endfor %}
+
+        <line class="viz-cross" visibility="hidden" y1="{{ c.MT }}" y2="{{ c.plot_bottom }}"/>
+        <g class="viz-cdots"></g>
+        <rect class="viz-hit" x="{{ c.ML }}" y="{{ c.MT }}" width="{{ c.PW }}" height="{{ c.PH }}"/>
+      </svg>
+      <div class="viz-tip" hidden></div>
+    </div>
+  </div>
+
+  <details class="viz-table">
+    <summary>Table view</summary>
+    <div style="overflow-x:auto">
+    <table>
+      <thead><tr>
+        <th>Day</th><th class="num">That day</th><th class="num">{{ text.total_name }}</th>{% if c.has_limit %}<th class="num">{{ text.left_name }}</th>{% endif %}
+        {% if c.has_forecast %}<th class="num">This month's pace</th><th class="num">Last 7 days' pace</th>{% if c.has_needed %}<th class="num">Needed</th>{% endif %}{% endif %}
+      </tr></thead>
+      <tbody>
+      {% for r in c.table %}
+        <tr><td>{{ r.date }}</td><td class="num">{{ r.day or "—" }}</td><td class="num">{{ r.actual or "—" }}</td>{% if c.has_limit %}<td class="num">{{ r.left or "—" }}</td>{% endif %}
+          {% if c.has_forecast %}<td class="num">{{ r.month or "—" }}</td><td class="num">{{ r.recent or "—" }}</td>{% if c.has_needed %}<td class="num">{{ r.needed or "—" }}</td>{% endif %}{% endif %}</tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    </div>
+  </details>
+  {% endif %}
+</section>

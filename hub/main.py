@@ -23,6 +23,7 @@ from hub import auth
 from hub.config import Config, load_config
 from hub.registry import REQUIREMENTS, Registry
 from hub.services.ai.service import AIService
+from hub.services.charts import Charts
 from hub.services.db import Database, hub_database
 from hub.services.gmail import GmailClient
 from hub.services.http import HttpConnections
@@ -51,6 +52,7 @@ class Hub:
     oauth: OAuthService
     scheduler: Scheduler
     templates: Jinja2Templates = field(init=False)
+    charts: Charts = field(init=False)
     registry: Registry = field(init=False)
 
     def template_globals(self) -> dict[str, Any]:
@@ -84,6 +86,7 @@ def build_hub(config: Config) -> Hub:
         )
     )
     hub.templates = make_templates([], config.tz, hub.template_globals())
+    hub.charts = Charts(hub.templates.env)
     return hub
 
 

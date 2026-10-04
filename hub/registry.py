@@ -177,6 +177,7 @@ class Registry:
             http=AppHttp(hub.http, app_id, app_cfg.get("connections")),
             scheduler=AppScheduler(hub.scheduler, app_id),
             kv=KV(hub.db, app_id),
+            charts=hub.charts.for_app(hub.config.tz),
             templates=templates,
             tz=hub.config.tz,
             log=logging.getLogger(f"apps.{app_id}"),

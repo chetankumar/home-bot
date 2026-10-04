@@ -10,7 +10,7 @@ from fastapi.testclient import TestClient
 from apps.finance import amazon, matching
 from tests.conftest import login
 from tests.test_finance import at, count, fin  # noqa: F401  (fin is a fixture)
-from tests.test_finance_amazon import SENDER, add_amazon, rows
+from tests.test_finance_amazon import SENDER, rows
 
 BASE = "/apps/finance"
 IST = ZoneInfo("Asia/Kolkata")

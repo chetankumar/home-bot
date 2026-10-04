@@ -4,13 +4,16 @@ Shows each part of the contract: a manifest, setup(ctx) returning a router,
 its own SQLite migrations, AI via an alias, a scheduled job, and kv settings.
 """
 
-from datetime import datetime
+from datetime import UTC, datetime
 
 from fastapi import APIRouter, Form, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 
 from hub.plugin import AppContext, Manifest
 from hub.services.ai import AIError
+from hub.services.chart_units import ChartText, Unit
+
+MONTHLY_GOAL = 20  # notes
 
 manifest = Manifest(
     id="hello",
@@ -33,12 +36,31 @@ def setup(ctx: AppContext) -> APIRouter:
 
     ctx.scheduler.interval("heartbeat", heartbeat, minutes=30)
 
+    def notes_per_day() -> dict[int, int]:
+        """This month's notes by day (in the hub timezone), for the chart."""
+        now = datetime.now(ctx.tz)
+        per_day: dict[int, int] = {}
+        for n in notes():
+            made = datetime.fromisoformat(n["created_at"]).replace(tzinfo=UTC).astimezone(ctx.tz)
+            if (made.year, made.month) == (now.year, now.month):
+                per_day[made.day] = per_day.get(made.day, 0) + 1
+        return per_day
+
+    def notes_chart():
+        # ctx.charts does the maths and the drawing; the app only supplies the per-day counts.
+        return ctx.charts.progress(
+            notes_per_day(), limit=MONTHLY_GOAL, unit=Unit.plain("notes"),
+            text=ChartText(title="Notes this month", noun="goal", total_name="Notes so far",
+                           left_name="Left to goal", activity="notes"),
+        )
+
     @router.get("/", response_class=HTMLResponse)
     def index(request: Request):
         return ctx.render(
             request,
             "hello.html",
             notes=notes(),
+            chart=notes_chart(),
             last_heartbeat=ctx.kv.get("last_heartbeat"),
             ai_ready=ctx.ai.available(),
         )

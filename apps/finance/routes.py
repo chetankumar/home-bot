@@ -4,12 +4,14 @@ from __future__ import annotations
 
 import sqlite3
 from datetime import date, datetime, timedelta
+from urllib.parse import urlencode
 
 from fastapi import APIRouter, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 
 from hub.plugin import AppContext
 from hub.services.ai import AIError
+from hub.services.chart_units import ChartText, Unit
 
 from . import categories as cats_db
 from . import stats, tagging
@@ -20,6 +22,10 @@ from .parsers import Parsed, parse_date, to_paise
 from . import orders as orders_mod
 from .sync import BACKFILL_KEY, JOB_ID, backfill_start, insert_transaction, reparse, senders
 
+CHART_TEXT = ChartText(
+    title="Spending through the month", noun="budget", total_name="Spent so far", left_name="Budget left",
+    big_name="Big payment", activity="spending",
+)
 INSTRUMENTS = ["upi", "credit_card", "debit_card", "netbanking", "atm"]
 
 
@@ -63,11 +69,24 @@ def build_router(ctx: AppContext) -> APIRouter:
 
     # -- dashboard -------------------------------------------------------------------
     @router.get("/", response_class=HTMLResponse)
-    def dashboard(request: Request, month: str | None = None):
+    def dashboard(request: Request, month: str | None = None, chart: str | None = None, forecast: str | None = None):
         t = today()
         y, m = stats.parse_ym(month, t)
+        # Forecast method: ?forecast= picks and remembers it; otherwise the remembered one (default run-rate).
+        mode = stats.parse_mode(forecast, stats.parse_mode(ctx.kv.get("forecast_mode")))
+        if forecast is not None and stats.parse_mode(forecast, "") and mode != ctx.kv.get("forecast_mode"):
+            ctx.kv.set("forecast_mode", mode)
+        threshold = round(float(ctx.config.get("oneoff_threshold", stats.DEFAULT_ONEOFF_PAISE / 100)) * 100)
+        view = chart if chart in ("climb", "burn") else "climb"
+        ym = f"{y:04d}-{m:02d}"
+
+        def link(**over: str) -> str:
+            q = {"month": ym, "chart": view, "forecast": mode, **over}
+            return ctx.url("/") + "?" + urlencode(q)
+
         with ctx.db() as conn:
-            b = stats.burn(conn, y, m, t, budget())
+            b = stats.burn(conn, y, m, t, budget(), mode, threshold)
+            series = stats.month_stats(conn, y, m, t, budget(), mode, threshold)
             cats = stats.by_category(conn, y, m)
             top = stats.top_recipients(conn, y, m)
             data = {
@@ -81,11 +100,19 @@ def build_router(ctx: AppContext) -> APIRouter:
         return ctx.render(
             request,
             "dashboard.html",
-            ym=f"{y:04d}-{m:02d}",
+            ym=ym,
             month_label=date(y, m, 1).strftime("%B %Y"),
             prev=stats.shift_month(y, m, -1),
             next=stats.shift_month(y, m, 1),
             is_current=(y, m) == (t.year, t.month),
+            forecast_mode=mode,
+            oneoff_threshold=threshold,
+            chart=ctx.charts.progress(
+                series.daily, year=y, month=m, today=t, limit=budget(), mode=mode, view=view,
+                big=series.big, unit=Unit.inr(), links={"climb": link(chart="climb"), "burn": link(chart="burn")},
+                text=CHART_TEXT,
+            ),
+            links={"runrate": link(forecast="runrate"), "oneoffs": link(forecast="oneoffs")},
             **data,
             **sync_context(),
         )
