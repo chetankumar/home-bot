@@ -238,6 +238,7 @@ scoped to your plugin.
 | `ctx.gmail` | `GmailClient` | Read-only Gmail (only if `requires=["gmail"]`) |
 | `ctx.scheduler` | `AppScheduler` | Cron and interval jobs with run history |
 | `ctx.kv` | `KV` | Small JSON settings store |
+| `ctx.charts` | `AppCharts` | Period statistics and a ready-made progress chart |
 | `ctx.templates` | `Jinja2Templates` | Your Jinja environment |
 | `ctx.render(...)` | method | Render a template to a response |
 | `ctx.tz` | `ZoneInfo` | Hub timezone (e.g. Asia/Kolkata) |
@@ -593,6 +594,71 @@ and ISO strings without an offset are shown as-is.
   `ctx.config.get("sync_cron", "15 7 * * *")`. Always give a default.
 - **`ctx.url(path)`** and **`ctx.prefix`**: build redirects with
   `RedirectResponse(ctx.url("/x"), status_code=303)`.
+
+### 6.9 `ctx.charts`: statistics and charts
+
+For the question *"how much so far this month, against an optional limit, and where is it heading?"*:
+spending against a budget, electricity against an allowance, data against a plan, calories against a goal.
+The host does the maths and draws the chart (inline SVG, light and dark mode, hover and keyboard readout, a
+table view); **your app only supplies the per-day amounts**. The service never touches a database.
+
+```python
+from hub.services.chart_units import ChartText, Unit
+
+stats = ctx.charts.stats(daily, limit=300000)                         # numbers only
+chart = ctx.charts.progress(daily, limit=300000, unit=Unit.inr())     # numbers + HTML
+return ctx.render(request, "usage.html", chart=chart)                 # template: {{ chart.html }}
+```
+
+Amounts are **integers in the unit's minor units** (paise for rupees, Wh for kWh, whole counts for notes), so
+sums never pick up floating-point error. `daily` is `{day_of_month: amount}` or a list (index 0 = day 1).
+The month defaults to the current one (hub timezone); pass `year=`, `month=` and `today=` to choose another.
+
+**`ctx.charts.stats(daily, *, year, month, today, limit, mode, big) -> ProgressStats`**
+
+| Argument | Meaning |
+|---|---|
+| `daily` | Per-day amounts so far |
+| `limit` | The budget / allowance / goal, or `None`. Must be positive |
+| `mode` | `"runrate"` (default): the average per day so far × days in the month. `"oneoffs"`: the items in `big` count once as already paid and only the rest is projected forward |
+| `big` | `[{"day": 1, "amount": 1500000, "name": "Rent"}, ...]`, used only in `"oneoffs"` mode. Your app decides what is big (for example, a single payment of ₹5,000 or more) |
+
+`ProgressStats` fields: `spent`, `days_elapsed`, `days_in_period`, `days_left`, `state` (`"current"`, `"past"` or
+`"future"`), `mode`, `limit`, `remaining`, `daily`, `cumulative`, `rate` (per-day pace), `projected` (forecast at the
+end of the month), `projected_over` (negative = under the limit), `target_daily` (what you can add per day from now
+and still finish on the limit), `cut_pct` (how far the pace must fall to do that, `None` if on track),
+`recent_pace` and `recent_end` (the same, over the last 7 days), `big` and `big_total`. Method
+`stats.crossing("month" | "recent")` returns the date the total reaches the limit (or the date it already did),
+or `None`.
+
+**`ctx.charts.progress(daily, *, ..., unit, view, links, text) -> ProgressChart`** takes the same arguments plus:
+
+| Argument | Meaning |
+|---|---|
+| `unit` | How amounts are written. `Unit.inr()` (default: ₹, paise, Indian grouping, `₹1.7L`), or `Unit.plain("kWh", minor=1000, decimals=1)`, `Unit.plain("notes")`, `Unit.plain("GB", prefix=False)` |
+| `view` | `"climb"` (default: the total rises toward the limit) or `"burn"` (what is left falls to zero; needs a `limit`, otherwise it falls back to climb) |
+| `links` | `{"climb": url, "burn": url}` shows a Climb-up / Burn-down toggle. Build the URLs yourself (they are your app's routes); omit for a chart with no toggle |
+| `text` | `ChartText(title=, noun=, total_name=, left_name=, big_name=, activity=)` to name things in your domain, e.g. `ChartText(title="Power this month", noun="allowance", total_name="Used so far", left_name="Allowance left")` |
+
+It returns a `ProgressChart` with `.html` (put it in a template as `{{ chart.html }}`: it is already safe to render
+and escapes any text you passed), `.stats` (the `ProgressStats`), `.view` (as drawn) and `.empty`.
+
+The chart shows the actual line, forecast lines at this month's pace and the last 7 days' pace, the limit, and a
+"needed to finish within the limit" line, with a plain-language summary above it ("At this month's pace you'll
+reach your ₹40,000 budget on 9 Oct and end at ₹1.7L"). Past months show the final result only; future months and
+months with no activity show an empty state.
+
+Notes:
+- Switching views or modes is your app's job and needs no JavaScript: link back to the same route with a query
+  parameter and pass the choice in. Validate untrusted input with `from hub.services.charts import parse_mode`
+  (it returns the value if valid, otherwise the default).
+- The chart's CSS and JavaScript are loaded by every hub page (`/static/charts.css`, `/static/charts.js`), so your
+  template needs nothing extra.
+- Use `stats()` alone when you only need the numbers (a "projected: ..." card, an alert when the limit will be hit).
+- Periods are calendar months for now. For a billing cycle that does not start on the 1st, shift the dates into a
+  month before passing them in.
+- Worked examples: `apps/hello` (notes per day against a goal, the smallest use) and `apps/finance` (spending
+  against a budget, both views and both forecast modes).
 
 ## 7. UI: templates, components, HTMX
 

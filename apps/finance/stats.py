@@ -6,15 +6,31 @@ count; Transfers don't). Credits and refunds are shown but not netted off.
 
 from __future__ import annotations
 
-import calendar
 import sqlite3
 from dataclasses import dataclass
 from datetime import date
+
+# Re-exported for the dashboard route (stats.parse_mode) and tests; the maths itself lives in the host.
+from hub.services.charts import (  # noqa: F401
+    MODE_ONEOFFS,
+    MODE_RUNRATE,
+    MODES,
+    ProgressStats,
+    parse_mode,
+    progress_stats,
+)
 
 SPEND_FILTER = (
     "t.direction = 'debit' AND (t.category_id IS NULL OR"
     " t.category_id IN (SELECT id FROM categories WHERE counts_as_spend = 1))"
 )
+
+
+# Forecast modes (the maths is the host's ctx.charts service). "runrate": average daily spend so far x
+# days in the month. "oneoffs": big single payments (rent, an EMI) count once as already paid and only
+# the everyday spend is extrapolated.
+FORECAST_MODES = MODES
+DEFAULT_ONEOFF_PAISE = 5000_00
 
 
 def month_bounds(year: int, month: int) -> tuple[str, str]:
@@ -60,6 +76,32 @@ def credits(conn: sqlite3.Connection, year: int, month: int) -> int:
     return int(row[0])
 
 
+def daily_spend(conn: sqlite3.Connection, year: int, month: int) -> dict[int, int]:
+    """Spend per day of the month (paise), for days that had any."""
+    start, end = month_bounds(year, month)
+    rows = conn.execute(
+        f"SELECT CAST(substr(t.occurred_at, 9, 2) AS INTEGER) AS day, SUM(t.amount_paise) AS total"
+        f" FROM transactions t WHERE {SPEND_FILTER} AND t.occurred_at >= ? AND t.occurred_at < ?"
+        f" GROUP BY day",
+        (start, end),
+    ).fetchall()
+    return {r["day"]: int(r["total"]) for r in rows}
+
+
+def big_payments(conn: sqlite3.Connection, year: int, month: int, threshold: int) -> list[dict]:
+    """Single spends at or above `threshold` paise, oldest first."""
+    start, end = month_bounds(year, month)
+    rows = conn.execute(
+        f"SELECT t.id, CAST(substr(t.occurred_at, 9, 2) AS INTEGER) AS day, t.amount_paise AS amount,"
+        f" COALESCE(r.name, t.counterparty_raw, 'Payment') AS name"
+        f" FROM transactions t LEFT JOIN recipients r ON r.id = t.recipient_id"
+        f" WHERE {SPEND_FILTER} AND t.amount_paise >= ? AND t.occurred_at >= ? AND t.occurred_at < ?"
+        f" ORDER BY t.occurred_at, t.id",
+        (threshold, start, end),
+    ).fetchall()
+    return [dict(r) for r in rows]
+
+
 @dataclass
 class Burn:
     spent: int  # paise
@@ -73,38 +115,52 @@ class Burn:
     days_left: int = 0  # days after today in the month
     target_daily: int | None = None  # paise/day you can spend from now to finish exactly on budget
     cut_pct: int | None = None  # % the current daily rate must fall to hit target_daily (None = on track)
+    mode: str = MODE_RUNRATE
+    big_total: int = 0  # paise of big payments counted once (only in "oneoffs" mode)
+    big_count: int = 0
 
 
-def burn(conn: sqlite3.Connection, year: int, month: int, today: date, budget: int | None) -> Burn:
-    total = spent(conn, year, month)
-    days_in_month = calendar.monthrange(year, month)[1]
-    if (year, month) == (today.year, today.month):
-        days = today.day
-    elif (year, month) < (today.year, today.month):
-        days = days_in_month
-    else:
-        days = 0
-    rate = round(total / days) if days else 0
-    projected = total if days == days_in_month else rate * days_in_month
-    remaining = (budget - total) if budget is not None else None
-    days_left = days_in_month - days
-    target = cut = None
-    if budget is not None and days_left > 0:
-        target = max(remaining, 0) // days_left  # floor: never plan to overshoot by rounding
-        if rate > target:
-            cut = round(100 * (1 - target / rate))
+def month_stats(
+    conn: sqlite3.Connection,
+    year: int,
+    month: int,
+    today: date,
+    budget: int | None,
+    mode: str = MODE_RUNRATE,
+    threshold: int = DEFAULT_ONEOFF_PAISE,
+) -> ProgressStats:
+    """The month's numbers, from the host's chart service, so the cards and the chart can't disagree."""
+    big = big_payments(conn, year, month, threshold) if mode == MODE_ONEOFFS else []
+    return progress_stats(
+        daily_spend(conn, year, month), year=year, month=month, today=today, limit=budget, mode=mode, big=big
+    )
+
+
+def burn(
+    conn: sqlite3.Connection,
+    year: int,
+    month: int,
+    today: date,
+    budget: int | None,
+    mode: str = MODE_RUNRATE,
+    threshold: int = DEFAULT_ONEOFF_PAISE,
+) -> Burn:
+    p = month_stats(conn, year, month, today, budget, mode, threshold)
     return Burn(
-        spent=total,
-        days_elapsed=days,
-        days_in_month=days_in_month,
-        daily_rate=rate,
-        projected=projected,
+        spent=p.spent,
+        days_elapsed=p.days_elapsed,
+        days_in_month=p.days_in_period,
+        daily_rate=p.rate,
+        projected=p.projected,
         budget=budget,
-        remaining=remaining,
-        projected_over=(projected - budget) if budget is not None else None,
-        days_left=days_left,
-        target_daily=target,
-        cut_pct=cut,
+        remaining=p.remaining,
+        projected_over=p.projected_over,
+        days_left=p.days_left,
+        target_daily=p.target_daily,
+        cut_pct=p.cut_pct,
+        mode=mode,
+        big_total=p.big_total,
+        big_count=len(p.big),
     )
 
 

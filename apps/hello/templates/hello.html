@@ -8,6 +8,8 @@
   {{ ui.stat_card("Last heartbeat", last_heartbeat | dt if last_heartbeat else "—", sub="interval job, every 30 min") }}
 {% endcall %}
 
+{{ chart.html }}
+
 <div class="columns">
   {% call ui.card("Notes") %}
     <form hx-post="{{ app_url('/notes') }}" hx-target="#notes" hx-on::after-request="this.reset()"

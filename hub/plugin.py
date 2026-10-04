@@ -23,6 +23,7 @@ from fastapi.templating import Jinja2Templates
 
 if TYPE_CHECKING:
     from hub.services.ai.service import AppAI
+    from hub.services.charts import AppCharts
     from hub.services.db import AppDB
     from hub.services.gmail import GmailClient
     from hub.services.http import AppHttp
@@ -50,6 +51,7 @@ class AppContext:
     http: AppHttp
     scheduler: AppScheduler
     kv: KV
+    charts: AppCharts
     templates: Jinja2Templates
     tz: ZoneInfo
     log: logging.Logger

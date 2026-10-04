@@ -12,9 +12,19 @@
 {% include "_sync_status.html" %}
 <p></p>
 
+<div class="controls">
+  <label for="fc">Forecast</label>
+  <div class="seg" id="fc" role="group" aria-label="Forecast method"
+       title="Big payments once: a single payment of {{ oneoff_threshold | inr(false) }} or more counts once as already paid; only everyday spend is projected forward.">
+    <a href="{{ links.runrate }}" class="{{ 'active' if forecast_mode == 'runrate' }}">Run-rate</a>
+    <a href="{{ links.oneoffs }}" class="{{ 'active' if forecast_mode == 'oneoffs' }}">Big payments once</a>
+  </div>
+  <span class="muted">{{ "Average daily spend so far × days in the month." if forecast_mode == "runrate" else "Payments of " ~ (oneoff_threshold | inr(false)) ~ " or more are counted once, not multiplied." }}</span>
+</div>
+
 {% call ui.stats() %}
   {{ ui.stat_card("Spent", burn.spent | inr(false), sub="Credits in: " ~ (credits | inr(false))) }}
-  {{ ui.stat_card("Daily burn", burn.daily_rate | inr(false), sub="over " ~ burn.days_elapsed ~ " of " ~ burn.days_in_month ~ " days") }}
+  {{ ui.stat_card("Daily burn", burn.daily_rate | inr(false), sub=(("everyday spend, " ~ (burn.big_total | inr(false)) ~ " in big payments counted once") if burn.mode == "oneoffs" and burn.big_count else ("over " ~ burn.days_elapsed ~ " of " ~ burn.days_in_month ~ " days"))) }}
   {{ ui.stat_card("Projected month-end", burn.projected | inr(false),
       sub=(("over budget by " ~ (burn.projected_over | inr(false))) if burn.projected_over is not none and burn.projected_over > 0 else ("within budget" if burn.budget else "no budget set")),
       tone=("bad" if burn.projected_over is not none and burn.projected_over > 0 else none)) }}
@@ -40,6 +50,8 @@
     {{ ui.stat_card("Budget", "—", sub="set one in Settings") }}
   {% endif %}
 {% endcall %}
+
+{{ chart.html }}
 
 {% if untagged or unparsed %}
 <div class="flash tone-warn">

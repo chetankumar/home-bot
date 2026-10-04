@@ -162,6 +162,16 @@ form.inline { display: inline; }
 .htmx-request.htmx-indicator, .htmx-request .htmx-indicator { opacity: 1; }
 .htmx-indicator { opacity: 0; transition: opacity .2s; }
 
+/* controls */
+.seg { display: inline-flex; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+.seg a, .seg span { padding: .3rem .8rem; font-size: .88rem; color: var(--muted); background: var(--surface); }
+.seg a + a, .seg span + a, .seg a + span { border-left: 1px solid var(--border); }
+.seg a:hover { background: var(--neutral-bg); text-decoration: none; color: var(--text); }
+.seg a.active { background: var(--accent); color: var(--accent-text); font-weight: 600; }
+.seg span.disabled { opacity: .5; cursor: not-allowed; }
+.controls { display: flex; gap: .75rem 1.25rem; align-items: center; flex-wrap: wrap; margin-bottom: 1rem; }
+.controls label { margin: 0; color: var(--muted); font-size: .88rem; }
+
 /* login */
 .login-page { display: grid; place-items: center; min-height: 100vh; padding: 16px; }
 .login { width: 100%; max-width: 340px; }

@@ -60,6 +60,7 @@ local = "lmstudio:qwen2.5-7b-instruct"
 # [apps.finance]
 # sync_cron = "15 7 * * *"        # daily sync time, in the hub timezone
 # orders_cron = "45 19 * * *"      # evening Amazon order scan (also the Orders page button)
+# oneoff_threshold = 5000          # rupees: a single payment this big counts once in the "Big payments once" forecast
 # amazon_backfill_days = 90        # how far back the first Amazon order scan looks
 # amazon_match_minutes = 30        # bank alert and order email count as "close" within this many minutes
 # amazon_amount_slack = 150        # rupees: how far a charge may differ from the item prices (fees, coupons)

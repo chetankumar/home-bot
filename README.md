@@ -292,6 +292,26 @@ How the numbers work:
   when you've already exceeded the budget it says so, since no daily rate can
   recover it.
 
+**The chart** under the dashboard cards grows as you spend. **Climb-up** shows
+spend rising through the month toward your budget; **Burn-down** shows the
+budget left falling toward zero. Both draw the forecast lines (at this month's
+pace, and at the last 7 days' pace), the budget, and the daily pace you need to
+finish within it, with a sentence above ("At this month's pace you'll reach
+your ₹40,000 budget on 9 Oct…"). Hover (or use the arrow keys) to read any day;
+the **Table view** under it has every number.
+
+The **Forecast** control above the cards chooses how the month is projected,
+for the chart and the cards together, and is remembered:
+- **Run-rate**: the average daily spend so far × days in the month (the default).
+- **Big payments once**: a single payment of ₹5,000 or more (set
+  `oneoff_threshold` under `[apps.finance]`) counts once as already paid, and
+  only the everyday spend is projected. A ₹15,000 rent on the 1st no longer
+  gets multiplied across the month.
+
+The chart is a **host service**, so any app can have one: see
+[`ctx.charts` in the plugin guide](docs/plugin-guide.md#69-ctxcharts-statistics-and-charts).
+The Hello app uses it for notes against a monthly goal.
+
 Once a full past month has been synced, Settings shows the trailing average
 as a budget hint.
 
