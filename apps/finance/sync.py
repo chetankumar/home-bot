@@ -16,7 +16,7 @@ from zoneinfo import ZoneInfo
 from hub.plugin import AppContext
 from hub.services.ai import AIError, ExtractionError
 
-from . import tagging
+from . import learn, tagging
 from .extract import ai_parse
 from .parsers import IGNORE, Parsed, parse_email
 
@@ -146,8 +146,10 @@ def _process_email(
     ctx: AppContext, conn: sqlite3.Connection, gmail_id: str, ai: AIState | None
 ) -> str:
     row = conn.execute("SELECT * FROM emails WHERE gmail_id = ?", (gmail_id,)).fetchone()
-    result: Parsed | str | None = parse_email(row["subject"], row["body"])
+    extra = [r.as_parser() for r in learn.bank_rules(conn)]
+    result: Parsed | str | None = parse_email(row["subject"], row["body"], extra)
     source, error = "regex", None
+    missed = result is None  # no built-in or approved regex read it: log it for the regex compiler
     if result is None and ai is not None and ai.enabled:
         source = "ai"
         try:
@@ -171,6 +173,12 @@ def _process_email(
         "UPDATE emails SET status = ?, parser = ?, error = ? WHERE gmail_id = ?",
         (status, parser, error, gmail_id),
     )
+    if not missed:
+        learn.clear_miss(conn, "bank", gmail_id)
+    else:
+        outcome = {"parsed": "ai_parsed", "ignored": "ai_ignored"}.get(status) if source == "ai" and not error else None
+        learn.record_miss(conn, "bank", gmail_id, outcome or ("ai_failed" if source == "ai" else "ai_skipped"))
+        ctx.log.info("regex miss (bank) %s -> %s", gmail_id, status)
     return status
 
 

@@ -16,6 +16,7 @@ from hub.services.chart_units import ChartText, Unit
 from . import categories as cats_db
 from . import stats, tagging
 from .category_routes import build_category_router
+from .learn_routes import build_learn_router
 from .order_routes import build_order_router
 from .queries import recipient_names, txn_rows
 from .parsers import Parsed, parse_date, to_paise
@@ -40,6 +41,7 @@ def build_router(ctx: AppContext) -> APIRouter:
     router = APIRouter()
     router.include_router(build_category_router(ctx))
     router.include_router(build_order_router(ctx))
+    router.include_router(build_learn_router(ctx))
 
     def today() -> date:
         return datetime.now(ctx.tz).date()

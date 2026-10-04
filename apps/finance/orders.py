@@ -13,7 +13,7 @@ from typing import Any
 
 from hub.plugin import AppContext
 
-from . import amazon, matching
+from . import amazon, learn, matching
 from .sync import backfill_start, local_iso
 
 JOB_ID = "orders"
@@ -104,7 +104,7 @@ def process_email(ctx: AppContext, conn: sqlite3.Connection, gmail_id: str, use_
 
 def _process_email(ctx: AppContext, conn: sqlite3.Connection, gmail_id: str, use_ai: bool) -> str:
     row = conn.execute("SELECT * FROM order_emails WHERE gmail_id = ?", (gmail_id,)).fetchone()
-    parsed: Any = amazon.parse_email(row["subject"], row["body"])
+    parsed: Any = amazon.parse_email(row["subject"], row["body"], learn.amazon_rules(conn))
     parser = parsed.parser if isinstance(parsed, amazon.ParsedOrder) else None
     # The model fills in what the regexes couldn't read: unreadable emails, or an order
     # whose items came only from the subject line, or whose total is missing.
@@ -113,9 +113,15 @@ def _process_email(ctx: AppContext, conn: sqlite3.Connection, gmail_id: str, use
         and (parsed.parser != "body" or parsed.total_paise is None)
         and parsed.status == "placed"
     )
+    if weak:  # the built-in (and approved) regexes didn't fully read it: log it for the regex compiler
+        learn.record_miss(conn, "amazon", gmail_id, "ai_skipped")
+    else:
+        learn.clear_miss(conn, "amazon", gmail_id)
     if use_ai and weak:
         parsed = amazon.ai_fill(ctx, row["subject"], row["body"], parsed if isinstance(parsed, amazon.ParsedOrder) else None)
         parser = parsed.parser if isinstance(parsed, amazon.ParsedOrder) else parser
+        learn.record_miss(conn, "amazon", gmail_id, _amazon_outcome(parsed))
+        ctx.log.info("regex miss (amazon) %s", gmail_id)
     if isinstance(parsed, amazon.ParsedOrder):
         upsert_order(conn, parsed, row["received_at"])
         status = "parsed"
@@ -128,6 +134,12 @@ def _process_email(ctx: AppContext, conn: sqlite3.Connection, gmail_id: str, use
         (status, parser, gmail_id),
     )
     return status
+
+
+def _amazon_outcome(parsed: Any) -> str:
+    if isinstance(parsed, amazon.ParsedOrder):
+        return "ai_parsed" if parsed.parser == "ai" else "ai_failed"
+    return "ai_ignored" if parsed == "ignore" else "ai_failed"
 
 
 # The full sync and the Orders-only job can overlap; scan one at a time.
@@ -177,11 +189,13 @@ def _scan(ctx: AppContext, now: datetime) -> dict[str, int]:
 
 
 def reparse(ctx: AppContext, use_ai: bool = True) -> dict[str, int]:
-    """Re-run the parser over unparsed/ignored Amazon emails, then re-match."""
+    """Re-run the parser over unparsed/ignored Amazon emails (and ones the regexes only half read),
+    then re-match."""
     stats = {"parsed": 0, "ignored": 0, "unparsed": 0, "matched": 0}
     with ctx.db() as conn:
         ids = [r[0] for r in conn.execute(
-            "SELECT gmail_id FROM order_emails WHERE status IN ('unparsed', 'ignored') ORDER BY received_at")]
+            "SELECT gmail_id FROM order_emails WHERE status IN ('unparsed', 'ignored')"
+            " OR gmail_id IN (SELECT gmail_id FROM parse_misses WHERE kind = 'amazon') ORDER BY received_at")]
     for gid in ids:
         with ctx.db() as conn:
             stats[process_email(ctx, conn, gid, use_ai)] += 1

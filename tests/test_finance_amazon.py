@@ -393,10 +393,10 @@ def test_one_unreadable_email_does_not_stop_the_scan(fin, monkeypatch):  # noqa:
     add_amazon(fin, "good2", "ordered_two_items.txt", at(3, 9))
     real = amazon_mod.parse_email
 
-    def parse(subject, body):
+    def parse(subject, body, *learned):
         if "Poison" in subject:
             raise ValueError("bad amount ','")
-        return real(subject, body)
+        return real(subject, body, *learned)
 
     monkeypatch.setattr(amazon_mod, "parse_email", parse)
     result = fin.sync.run_sync(fin.ctx, now=at(4))["orders"]
@@ -417,10 +417,10 @@ def test_one_unreadable_bank_alert_does_not_stop_the_sync(fin, monkeypatch):  # 
         fin.gmail.add(mid, body, at(1 + i, 9), subject=subject)
     real = sync_mod.parse_email
 
-    def parse(subject, body):
+    def parse(subject, body, *extra):
         if "Credit Card" in body:
             raise RuntimeError("parser blew up")
-        return real(subject, body)
+        return real(subject, body, *extra)
 
     monkeypatch.setattr(sync_mod, "parse_email", parse)
     result = fin.sync.run_sync(fin.ctx, now=at(3))

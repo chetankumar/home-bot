@@ -9,7 +9,9 @@ bodies are stored so improving a parser never needs a re-fetch.
 from __future__ import annotations
 
 import re
+from collections.abc import Sequence
 from dataclasses import dataclass, field
+from typing import Any
 
 from pydantic import BaseModel, Field
 
@@ -121,9 +123,12 @@ def estimate_total(items: list[OrderItem]) -> int | None:
     return sum(i.price_paise for i in items)
 
 
-def parse_email(subject: str, body: str) -> ParsedOrder | str | None:
+def parse_email(subject: str, body: str, learned: Sequence[Any] = ()) -> ParsedOrder | str | None:
     """-> ParsedOrder; 'ignore' for mail that isn't about an order; None if it should
-    be an order but couldn't be read (the caller then tries the local model)."""
+    be an order but couldn't be read (the caller then tries the local model).
+
+    `learned` are approved learned rules (learn.AmazonRule); they only fill what the
+    built-in patterns left empty."""
     text = f"{subject}\n{body}"
     m = ORDER_NO.search(text)
     if not m:
@@ -133,12 +138,30 @@ def parse_email(subject: str, body: str) -> ParsedOrder | str | None:
     order.total_paise = parse_total(body)
     order.total_source = "email" if order.total_paise is not None else None
     order.parser = "body"
+    if order.total_paise is None or not order.items:
+        _apply_learned(order, body, learned)
     if not order.items:
         title = subject_title(subject)
         if title:
             order.items = [OrderItem(title)]
             order.parser = "subject"
     return order
+
+
+def _apply_learned(order: ParsedOrder, body: str, learned: Sequence[Any]) -> None:
+    from . import learn  # imported here: learn.py imports this module
+
+    flat = collapse(body)
+    for rule in learned:
+        if order.total_paise is None and rule.total and (m := rule.total.search(flat)):
+            try:
+                order.total_paise, order.total_source = to_paise(m.group("total")), "email"
+            except ValueError:
+                pass
+        if not order.items:
+            order.items = learn.amazon_items(rule, body)
+        if order.total_paise is not None and order.items:
+            break
 
 
 # -- local-model fallback ----------------------------------------------------------------
