@@ -10,7 +10,15 @@ import sqlite3
 from dataclasses import dataclass
 from datetime import date
 
-from hub.services.charts import MODE_ONEOFFS, MODE_RUNRATE, MODES, ProgressStats, progress_stats
+# Re-exported for the dashboard route (stats.parse_mode) and tests; the maths itself lives in the host.
+from hub.services.charts import (  # noqa: F401
+    MODE_ONEOFFS,
+    MODE_RUNRATE,
+    MODES,
+    ProgressStats,
+    parse_mode,
+    progress_stats,
+)
 
 SPEND_FILTER = (
     "t.direction = 'debit' AND (t.category_id IS NULL OR"
