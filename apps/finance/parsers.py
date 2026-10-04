@@ -8,7 +8,7 @@ database, so parsers can be tightened and re-run without re-fetching.
 from __future__ import annotations
 
 import re
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from datetime import date, datetime
 from decimal import Decimal, InvalidOperation
@@ -220,10 +220,15 @@ PARSERS: list[tuple[str, re.Pattern[str], Builder]] = [
 ]
 
 
-def parse_email(subject: str, body: str) -> Parsed | str | None:
-    """Return Parsed for a transaction, IGNORE for non-transaction mail, None if unsure."""
+def parse_email(
+    subject: str, body: str, extra: Sequence[tuple[str, re.Pattern[str], Builder]] = ()
+) -> Parsed | str | None:
+    """Return Parsed for a transaction, IGNORE for non-transaction mail, None if unsure.
+
+    `extra` are approved learned parsers (see learn.py); they are tried after the built-in ones.
+    """
     text = collapse(body)
-    for name, rx, build in PARSERS:
+    for name, rx, build in [*PARSERS, *extra]:
         m = rx.search(text)
         if m:
             try:

@@ -1,0 +1,53 @@
+{% extends "finance_base.html" %}
+{% block content %}
+<h1>Parsers</h1>
+<p class="muted">Emails the built-in regexes couldn't read are logged here. The local model can propose regexes
+  from up to 10 of them; nothing is used until you approve it.</p>
+{{ ui.flash(msg) }}
+<div class="columns">
+{% for kind, label in kinds.items() %}
+  {% call ui.card(label) %}
+    {% set m = misses[kind] %}
+    <p>{{ m.values() | sum }} email(s) missed by regex:
+      {{ m.get("ai_parsed", 0) }} read by the model · {{ m.get("ai_ignored", 0) }} judged not relevant ·
+      {{ m.get("ai_failed", 0) }} model failed · {{ m.get("ai_skipped", 0) }} model not tried</p>
+    <form method="post" action="{{ app_url('/parsers/propose') }}">
+      <input type="hidden" name="kind" value="{{ kind }}">
+      <button {{ "disabled" if not ai_ready or not m }}>Ask the model for regexes</button>
+    </form>
+  {% endcall %}
+{% endfor %}
+</div>
+<h2>Regexes</h2>
+{% for r in rules %}
+  {% call ui.card(r.name ~ " — " ~ kinds[r.kind]) %}
+    <p>{{ ui.badge(r.status, "good" if r.status == "active" else "warn" if r.status == "proposed" else "info") }}
+      matched {{ r.matched }} of {{ r.samples }} sample emails
+      {% if r.direction %} · {{ r.direction }} · {{ r.instrument | replace("_", " ") }}{% endif %}</p>
+    <pre class="trace">{{ r.pattern }}{% if r.item_pattern %}
+
+items: {{ r.item_pattern }}{% endif %}</pre>
+    {% if r.preview %}<p class="muted">First match read as: <code>{{ r.preview | tojson }}</code></p>{% endif %}
+    {% if r.status == "proposed" %}
+    <form method="post" action="{{ app_url('/parsers/' ~ r.id ~ '/approve') }}" class="row">
+      <button>Approve &amp; re-read missed emails</button>
+    </form>
+    <form method="post" action="{{ app_url('/parsers/' ~ r.id ~ '/reject') }}" style="margin-top: .5rem">
+      <button class="secondary small">Reject</button>
+    </form>
+    {% elif r.status == "active" %}
+    <form method="post" action="{{ app_url('/parsers/' ~ r.id ~ '/disable') }}">
+      <button class="secondary small">Disable</button>
+    </form>
+    {% endif %}
+  {% endcall %}
+{% else %}
+  <p class="muted">No proposals yet.</p>
+{% endfor %}
+<h2>Recent misses</h2>
+{% for e in recent %}
+  <p class="muted">{{ e.received_at | replace("T", " ") }} · {{ kinds[e.kind] }} · {{ e.subject or "(no subject)" }} · {{ e.outcome | replace("_", " ") }}</p>
+{% else %}
+  <p class="muted">None logged yet.</p>
+{% endfor %}
+{% endblock %}
