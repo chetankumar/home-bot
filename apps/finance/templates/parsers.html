@@ -37,8 +37,15 @@ items: {{ r.item_pattern }}{% endif %}</pre>
 {% for kind, label in kinds.items() %}{% if transcripts.get(kind) %}
 <details><summary class="muted">Last conversation with the model: {{ label }}</summary>
   {% for m in transcripts[kind] %}
+    {% if m.role %}{# conversations saved by an older version: plain chat turns #}
     <p class="muted"><strong>{{ "Model" if m.role == "assistant" else "Us" }}</strong></p>
     <pre class="trace">{{ m.content[:1500] }}{{ "…" if m.content | length > 1500 }}</pre>
+    {% else %}
+    <p class="muted"><strong>Reply {{ m.n }}</strong> · temperature {{ m.temperature }}{% if m.note %} · {{ m.note }}{% endif %}</p>
+    <details><summary class="muted">What we sent</summary>
+      <pre class="trace">{{ m.prompt[:3000] }}{{ "…" if m.prompt | length > 3000 }}</pre></details>
+    <pre class="trace">{{ m.reply[:2500] }}{{ "…" if m.reply | length > 2500 }}</pre>
+    {% endif %}
   {% endfor %}
 </details>
 {% endif %}{% endfor %}

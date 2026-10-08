@@ -927,7 +927,10 @@ provides the following:
 | `fixture_email(name)` | Reads `tests/fixtures/finance/<name>` as (subject, body) |
 
 `tests/test_ai.py` also has `FakeProvider(name, outputs=[...])`, a stand-in AI
-provider that records calls. `extract()` returns the queued outputs in order.
+provider that records calls. `extract()` returns the queued outputs in order;
+set `.texts = [...]` to script `complete()` replies too (an empty list makes it
+raise, to test an unreachable model), and `.temps` records the temperature of
+each `complete()` call.
 
 The scheduler isn't started in tests (the `TestClient` isn't used as a context
 manager). Call your job directly, or use `ctx.scheduler.run_now(job,
@@ -1029,7 +1032,7 @@ shows:
 | `migrations/001_init.sql` | Several tables, foreign keys, seed rows |
 | `sync.py` | Idempotent Gmail import, per-item error isolation, a job that raises on failure |
 | `extract.py` | `ctx.ai.extract` with a Pydantic schema and validator, local-only AI policy |
-| `learn.py` | Rules in the DB with a score, a multi-turn `ctx.ai.extract` loop, jobs started on demand with `ctx.scheduler.run_now` (see `docs/finance-parsing.md`) |
+| `learn.py` | Rules in the DB with a score, a retrying `ctx.ai.complete` loop that varies `temperature`, jobs started on demand with `ctx.scheduler.run_now` (see `docs/finance-parsing.md`) |
 | `routes.py` | Many pages, forms, HTMX partials, the "Sync now" pattern |
 | `templates/finance_base.html` | Shared tab bar via `ui.subnav` |
 | `templates/_txn_row.html` | Inline row editing |

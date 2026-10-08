@@ -23,7 +23,7 @@ from typing import Literal
 from pydantic import BaseModel, Field
 
 from hub.plugin import AppContext
-from hub.services.ai import AIError, ExtractionError
+from hub.services.ai import AIError
 
 from . import amazon
 from .amazon import AmazonRule, amazon_items
@@ -165,6 +165,13 @@ class AmazonProposal(BaseModel):
     item_pattern: str | None = Field(default=None, description="Regex with named groups `title`, optional `qty`, `price`")
 
 
+REPLY_FORMAT = (
+    "Reply in two parts. First think inside <analysis>...</analysis>: compare how the emails word the same "
+    "thing, and if a previous attempt failed, say exactly where it broke and what you will change. Then give "
+    "the final answer as JSON inside <json>...</json>, shaped like this example:\n"
+)
+
+
 BANK_SYSTEM = (
     "You write Python regular expressions for Indian bank (HDFC) alert emails. You get several emails "
     "that existing parsers could not read. Digit runs of 8+ are masked as XXXX1234 in what you see; in the "
@@ -174,7 +181,8 @@ BANK_SYSTEM = (
     "(?P<amount>...) captures only the number (digits, commas, dot) after Rs./INR/₹; optional "
     "(?P<date>...), (?P<acct>...) last 4 digits, (?P<merchant>...), (?P<vpa>...). Anchor on wording "
     "around the values, not on the values. Never nest quantifiers like (a+)+. Set direction and instrument "
-    "for the family. Skip emails that are not about money moving."
+    "for the family. Skip emails that are not about money moving.\n\n" + REPLY_FORMAT +
+    '<json>{"parsers": [{"name": "upi_debit_v3", "pattern": "...", "direction": "debit", "instrument": "upi"}]}</json>'
 )
 
 AMAZON_SYSTEM = (
@@ -183,7 +191,8 @@ AMAZON_SYSTEM = (
     "captures only the order total number (digits, commas, dot), not subtotals; and item_pattern run "
     "line-by-line-aware (multiline mode, ^ and $ match at line ends) with (?P<title>...) per item and "
     "optionally (?P<qty>\\d+) and (?P<price>...). Use patterns that work across all the emails. Never "
-    "nest quantifiers like (a+)+. Use null when no reliable pattern exists."
+    "nest quantifiers like (a+)+. Use null when no reliable pattern exists.\n\n" + REPLY_FORMAT +
+    '<json>{"name": "paid_total", "total_pattern": "...", "item_pattern": null}</json>'
 )
 
 
@@ -214,6 +223,7 @@ class Check:
     preview: str | None = None
     missed: list[int] = field(default_factory=list)  # 1-based numbers of emails it did not read
     wrong: list[str] = field(default_factory=list)  # emails it read differently from the earlier reading
+    captured: tuple[int, dict] | None = None  # (email number, named groups) of the first email it matched
 
 
 def _bank_check(rule: BankRule, samples: list[sqlite3.Row], conn: sqlite3.Connection) -> Check:
@@ -229,6 +239,8 @@ def _bank_check(rule: BankRule, samples: list[sqlite3.Row], conn: sqlite3.Connec
                 p = build(m, text)
             except ValueError:
                 p = None
+        if m and out.captured is None:
+            out.captured = (i, {k: v for k, v in m.groupdict().items() if v is not None})
         if p is None or p.amount_paise <= 0:
             out.missed.append(i)
             continue
@@ -266,8 +278,27 @@ def _snippet(sample: sqlite3.Row, kind: str) -> str:
     """The part of an unread email worth showing the model: around the first amount, else the start."""
     text = mask(amazon.collapse_keep_lines(sample["body"]) if kind == "amazon" else collapse(sample["body"]))
     m = re.search(r"(?:rs\.?|inr|₹)\s*\d", text, re.I)
-    start = max(0, (m.start() if m else 0) - 100)
-    return text[start : start + 260].replace("\n", " / ")
+    start = max(0, (m.start() if m else 0) - 120)
+    return text[start : start + 400].replace("\n", " / ")
+
+
+def break_point(pattern: str, text: str, multiline: bool = False) -> str:
+    """Where does the pattern stop matching this email? Finds the longest prefix of the pattern that
+    still matches somewhere and reports what it matched and what the email has next. Best effort."""
+    flags = re.I | (re.M if multiline else 0)
+    for end in range(len(pattern) - 1, 3, -1):
+        try:
+            rx = re.compile(pattern[:end], flags)
+        except re.error:
+            continue
+        m = rx.search(text)
+        if m and m.end() > m.start():
+            matched = mask(m.group(0))[-90:]
+            after = mask(text[m.end() : m.end() + 70])
+            rest = pattern[end : end + 50]
+            return (f"The pattern matches up to \"...{matched}\" but then expects `{rest}`, "
+                    f"while the email continues with \"{after}\".")
+    return "Not even the start of the pattern matches anywhere in this email."
 
 
 @dataclass
@@ -275,6 +306,8 @@ class Verdict:
     ok: bool
     notes: list[str]
     row: tuple | None = None  # what to insert when ok
+    missed: int | None = None  # number of the first email the regex did not read
+    pattern: str = ""
 
 
 def _evaluate(
@@ -306,13 +339,20 @@ def _evaluate(
         pattern, item_pattern = (pattern if total else ""), (item_pattern if items else None)
     if check.hits >= need:
         return Verdict(True, [], (name, pattern, item_pattern, direction, instrument, check.hits, check.preview))
-    notes = [f"'{name}' read only {check.hits} of {len(samples)} emails (it must read at least {need})."]
+    notes = [f"'{name}' matched {check.hits} of {len(samples)} emails (it must match at least {need})."]
     notes += check.wrong
+    if check.captured:
+        i, groups = check.captured
+        notes.append(f"For example on email {i} it captured {json.dumps(groups, ensure_ascii=False)[:200]}.")
+    multiline = kind == "amazon" and not pattern
+    shown = pattern or item_pattern or ""
     for i in check.missed[:3]:
-        notes.append(f"it did not match email {i}, which contains: \"{_snippet(samples[i - 1], kind)}\"")
+        text = samples[i - 1]["body"] if multiline else collapse(samples[i - 1]["body"])
+        notes.append(f"Regex failed on email {i}: \"{_snippet(samples[i - 1], kind)}\". "
+                     + break_point(shown, text, multiline))
     if len(check.missed) > 3:
         notes.append(f"... and {len(check.missed) - 3} more emails did not match.")
-    return Verdict(False, notes)
+    return Verdict(False, notes, missed=check.missed[0] if check.missed else None, pattern=shown)
 
 
 def _why_not_compiled(pattern: str, group: str) -> str:
@@ -328,15 +368,75 @@ def _why_not_compiled(pattern: str, group: str) -> str:
 
 
 MAX_REPLIES = 20
-HISTORY_CHARS = 60_000  # keep the conversation within a local model's context
+BASE_TEMP = 0.2  # a little sampling from the start; the model is not asked to be deterministic
+TEMP_STEP = 0.25  # added for each consecutive repeated answer
+MAX_TEMP = 0.9
+REPLY_TOKENS = 1800  # room for the <analysis> as well as the JSON
+TRIED_SHOWN = 3  # failed patterns listed in the next prompt, so the model doesn't return to them
+
+_TAG_JSON = re.compile(r"<json>(.*?)(?:</json>|$)", re.S | re.I)
+_TAG_ANALYSIS = re.compile(r"<analysis>(.*?)(?:</analysis>|<json>|$)", re.S | re.I)
+_FENCE = re.compile(r"```(?:json)?\s*(\{.*?\})\s*```", re.S | re.I)
 
 
-def _trim(messages: list[dict]) -> list[dict]:
-    """Drop the oldest answer/feedback rounds (never the samples) when the history gets long."""
-    msgs = list(messages)
-    while len(msgs) > 3 and sum(len(m["content"]) for m in msgs) > HISTORY_CHARS:
-        del msgs[1:3]
-    return msgs
+def parse_reply(text: str, schema: type[BaseModel]) -> tuple[str, BaseModel | None, str | None]:
+    """(analysis, parsed answer, problem). Accepts <json> tags, a fenced block, or bare JSON."""
+    m = _TAG_ANALYSIS.search(text)
+    analysis = m.group(1).strip() if m else ""
+    raw = None
+    for rx in (_TAG_JSON, _FENCE):
+        if m := rx.search(text):
+            raw = m.group(1)
+            break
+    if raw is None and "{" in text and "}" in text:
+        raw = text[text.index("{") : text.rindex("}") + 1]
+    if raw is None:
+        return analysis, None, "I found no JSON. Put the final answer inside <json>...</json>."
+    raw = re.sub(r"^\s*```(?:json)?|```\s*$", "", raw.strip(), flags=re.I).strip()
+    try:
+        return analysis, schema.model_validate_json(raw), None
+    except ValueError as e:  # pydantic's ValidationError is a ValueError
+        first = str(e).splitlines()[0:3]
+        return analysis, None, "The JSON was not valid for the required shape: " + " ".join(first)
+
+
+def signature(candidates: list[tuple]) -> tuple:
+    """What an answer says, ignoring its name and spacing: used to spot a repeated answer."""
+    return tuple(sorted((c[1] or "", c[2] or "") for c in candidates))
+
+
+def _round_prompt(
+    kind: str, blocks: str, samples: list[sqlite3.Row], last: dict | None, tried: list[str], repeats: int
+) -> tuple[str, str]:
+    """One self-contained message: the emails plus a short account of the last attempt only.
+
+    Earlier answers are never replayed as chat turns; repeating the same turns teaches the model to
+    repeat itself. Returns (the whole prompt, the part worth showing on the Parsers page, i.e. all
+    but the sample emails).
+    """
+    if last is None:
+        full = f"Here are the emails.\n\n{blocks}\n\nAnalyse them, then give the regexes."
+        return full, full
+    parts = []
+    if repeats:  # stuck: shrink the problem to one email the pattern still fails on
+        i = last["missed"] or 1
+        one = _sample_block(i, samples[i - 1]["subject"], samples[i - 1]["body"],
+                            3000 if kind == "amazon" else 2500, kind == "amazon")
+        parts.append(
+            f"You have now given the same answer {repeats + 1} times, and it does not work. Do not give it "
+            "again. Focus on this one email and write a materially different pattern: anchor on different "
+            "words, make spaces and optional parts more tolerant, or match the wording in this email "
+            f"directly.\n\n{one}")
+    else:
+        parts.append(f"Here are the emails.\n\n{blocks}")
+    shown_from = 1 if not repeats else 0  # the one-email focus is small and different each time: keep it
+    parts.append("Your previous attempt:\n" + last["answer"])
+    parts.append("What went wrong:\n" + last["feedback"])
+    if tried:
+        parts.append("Patterns that already failed (do not return to them):\n"
+                     + "\n".join(f"- {t}" for t in tried[-TRIED_SHOWN:]))
+    parts.append("Compare the emails again in <analysis>, then give a corrected answer in <json>.")
+    return "\n\n".join(parts), "\n\n".join(parts[shown_from:])
 
 
 def _record(conn: sqlite3.Connection, nid: int, **cols: object) -> None:
@@ -348,9 +448,10 @@ def negotiate(ctx: AppContext, kind: str) -> str:
     """Ask the model for regexes from up to 10 missed emails, and keep going until one holds up.
 
     After every reply each proposal is tested against the same emails. If none passes, the exact
-    failures go back to the model and it answers again, up to MAX_REPLIES model replies. Passing
-    regexes are saved as proposals (they still need approval). Returns a one-line result; the
-    full conversation is kept in regex_negotiations for the Parsers page and dashboard.
+    failures go to the model in a fresh, short prompt (not an ever-longer chat) and it answers
+    again, up to MAX_REPLIES. A repeated answer raises the temperature and narrows the prompt to
+    one failing email. Passing regexes are saved as proposals (they still need approval). Returns a
+    one-line result; the rounds are kept in regex_negotiations for the Parsers page and dashboard.
     """
     if kind not in ("bank", "amazon"):
         raise ValueError(kind)
@@ -369,25 +470,40 @@ def negotiate(ctx: AppContext, kind: str) -> str:
         _sample_block(i, s["subject"], s["body"], 3000 if kind == "amazon" else 2500, kind == "amazon")
         for i, s in enumerate(samples, 1)
     )
-    schema, system, tokens = (
-        (BankProposals, BANK_SYSTEM, 900) if kind == "bank" else (AmazonProposal, AMAZON_SYSTEM, 700)
-    )
+    schema, system = (BankProposals, BANK_SYSTEM) if kind == "bank" else (AmazonProposal, AMAZON_SYSTEM)
     need = min(2, len(samples))
-    messages: list[dict] = [{"role": "user", "content": blocks}]
-    feedback = ""
+    rounds: list[dict] = []  # what the Parsers page shows
+    last: dict | None = None  # the previous attempt: its answer, the feedback, and the first email it missed
+    tried: list[str] = []  # failed patterns, oldest first
+    seen: set[tuple] = set()
+    repeats, temperature = 0, BASE_TEMP
     for reply in range(1, MAX_REPLIES + 1):
+        prompt, shown = _round_prompt(kind, blocks, samples, last, tried, repeats)
+        used = temperature
         try:
-            got = ctx.ai.extract(_trim(messages), schema=schema, system=system, max_tokens=tokens)
+            text = ctx.ai.complete(
+                [{"role": "user", "content": prompt}], system=system, max_tokens=REPLY_TOKENS,
+                temperature=temperature,
+            ).text
+        except AIError as e:
+            with ctx.db() as conn:
+                _record(conn, nid, status="unavailable", replies=reply - 1, last_error=str(e),
+                        transcript=json.dumps(rounds), finished_at=_now())
+            return f"Local model not available: {e}"
+        analysis, got, problem = parse_reply(text, schema)
+        saved, feedback, missed, answer = 0, "", None, "(no usable answer)"
+        note = ""
+        if got is None:
+            feedback = problem or "The answer could not be read."
+        else:
             answer = got.model_dump_json()
             candidates = (
                 [(p.name, p.pattern, None, p.direction, p.instrument) for p in got.parsers]
                 if kind == "bank"
                 else [(got.name, got.total_pattern, got.item_pattern, None, None)]
             )
-            verdicts = []
             with ctx.db() as conn:
                 verdicts = [_evaluate(kind, c, samples, conn, need) for c in candidates]
-                saved = 0
                 for v in verdicts:
                     if v.ok:
                         name, pattern, item_pattern, direction, instrument, hits, preview = v.row
@@ -399,38 +515,35 @@ def negotiate(ctx: AppContext, kind: str) -> str:
                         )
                         saved += 1
             if not candidates:
-                feedback = "You returned no patterns. Write at least one pattern."
+                feedback = "You returned no patterns. Write at least one."
             else:
                 feedback = "\n".join(f"- {n}" for v in verdicts if not v.ok for n in v.notes)
-        except ExtractionError as e:  # the model's answer wasn't usable JSON, even after one retry
-            answer, saved = "", 0
-            feedback = f"Your reply could not be read as the required JSON ({e}). Answer again in that format."
-        except AIError as e:
-            with ctx.db() as conn:
-                _record(conn, nid, status="unavailable", replies=reply - 1, last_error=str(e),
-                        transcript=json.dumps(messages), finished_at=_now())
-            return f"Local model not available: {e}"
+                missed = next((v.missed for v in verdicts if v.missed), None)
+                sig = signature(candidates)
+                if sig in seen:  # the same answer as before (the last one, or an earlier failure)
+                    repeats += 1
+                    temperature = min(MAX_TEMP, BASE_TEMP + TEMP_STEP * repeats)
+                    note = f"repeated answer; next try at temperature {temperature:g} on one email"
+                else:
+                    repeats, temperature = 0, BASE_TEMP
+                seen.add(sig)
+                tried += [c[1] or c[2] for c in candidates if (c[1] or c[2]) and (c[1] or c[2]) not in tried]
+        rounds.append({"n": reply, "temperature": used, "prompt": shown, "reply": text, "note": note})
         if saved:
-            messages.append({"role": "assistant", "content": answer})
             with ctx.db() as conn:
                 _record(conn, nid, status="succeeded", replies=reply, last_error=None,
-                        transcript=json.dumps(messages), finished_at=_now())
+                        transcript=json.dumps(rounds), finished_at=_now())
                 conn.execute(  # the problem is solved: older failures for this source no longer matter
                     "UPDATE regex_negotiations SET dismissed = 1 WHERE kind = ? AND id != ?"
                     " AND status IN ('failed', 'unavailable')", (kind, nid))
             ctx.log.info("regex compiler (%s): %d proposal(s) after %d repl%s", kind, saved, reply,
                          "y" if reply == 1 else "ies")
             return f"{saved} regex proposal(s) ready to review, tested on {len(samples)} emails ({reply} model repl{'y' if reply == 1 else 'ies'})."
-        if answer:
-            messages.append({"role": "assistant", "content": answer})
-        messages.append({
-            "role": "user",
-            "content": "None of that worked:\n" + feedback + "\nFix these problems and answer again in the same format.",
-        })
+        last = {"answer": answer, "feedback": feedback, "missed": missed}
         with ctx.db() as conn:
-            _record(conn, nid, replies=reply, last_error=feedback, transcript=json.dumps(messages))
+            _record(conn, nid, replies=reply, last_error=feedback, transcript=json.dumps(rounds))
     with ctx.db() as conn:
-        _record(conn, nid, status="failed", replies=MAX_REPLIES, transcript=json.dumps(messages),
+        _record(conn, nid, status="failed", replies=MAX_REPLIES, transcript=json.dumps(rounds),
                 finished_at=_now())
     ctx.log.warning("regex compiler (%s): gave up after %d replies", kind, MAX_REPLIES)
     return f"The model could not produce a working regex in {MAX_REPLIES} replies."

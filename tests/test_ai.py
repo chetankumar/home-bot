@@ -25,10 +25,18 @@ class FakeProvider:
         self.available = available
         self.calls = []
         self.outputs = list(outputs or [])
+        self.texts = None  # scripted complete() replies; None = always "hi", an empty list = raise
+        self.temps = []  # the temperature of each complete() call
 
     def complete(self, model, messages, max_tokens, temperature):
         self.calls.append(("complete", model, messages))
-        return Completion("hi", self.name, model, Usage(3, 1))
+        self.temps.append(temperature)
+        text = "hi"
+        if self.texts is not None:
+            if not self.texts:
+                raise RuntimeError("no scripted reply")
+            text = self.texts.pop(0)
+        return Completion(text, self.name, model, Usage(3, 1))
 
     def stream(self, model, messages, max_tokens, temperature):
         self.calls.append(("stream", model, messages))

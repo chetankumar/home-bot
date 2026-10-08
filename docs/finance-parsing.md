@@ -133,12 +133,15 @@ there are proposals still waiting for you.
 trimmed. For bank misses the model already read, its amount is kept as the
 answer the new regex must agree with.
 
-**The conversation** (`learn.negotiate`, one `ctx.ai.extract` call per reply,
+**The conversation** (`learn.negotiate`, one `ctx.ai.complete` call per reply,
 max **20 model replies**):
 
-1. First message: the samples. The model answers with up to 3 bank regexes
-   (each with direction and instrument), or an Amazon `total_pattern` and/or
-   `item_pattern`.
+1. First prompt: the samples. The model replies in two parts: its thinking
+   inside `<analysis>…</analysis>`, then the answer as JSON inside
+   `<json>…</json>`: up to 3 bank regexes (each with direction and instrument),
+   or an Amazon `total_pattern` and/or `item_pattern`. A fenced ```` ```json ````
+   block or bare JSON is also accepted. The analysis is kept and shown on
+   the Parsers page.
 2. Each regex is tested on the same samples. It passes if it is safe, has the
    required named group, and reads **at least 2** of the samples (or all of
    them if fewer than 2) with amounts that agree with the model's earlier
@@ -148,11 +151,14 @@ max **20 model replies**):
      of the reasons nothing runs without your approval.
 3. If one or more pass, the conversation **stops**. They are saved as
    `proposed`.
-4. If none passes, the model is sent exactly what was wrong and asked to
-   answer again: the regex isn't valid or is unsafe; a named group is
-   missing; "read only 0 of 10 emails", with the text around the amount of the
-   first few emails it missed; or "your amount was 49 but it is 349".
-   Unusable replies are asked to be re-sent in the required format.
+4. If none passes, the model is asked again, with exactly what was wrong:
+   the regex isn't valid or is unsafe; a named group is missing; "matched 1 of
+   5 emails", then for each of the first three emails it missed, the text
+   around the amount and **where the pattern breaks** ("matches up to
+   `…debited from account 4321` but then expects `via upi`, while the email
+   continues with `to VPA …`"); what the groups captured on an email it did
+   read; or "your amount was 49 but it is 349". An unreadable reply is
+   reported as such and counts as a reply.
 5. After 20 replies without a pass the run is **failed**. A red line appears
    on the **dashboard** ("The regex compiler gave up on HDFC alerts after 20
    model replies") with a link to the whole conversation and a Dismiss
@@ -160,12 +166,30 @@ max **20 model replies**):
    be reached the dashboard shows a yellow warning instead, which is not
    counted as giving up.
 
-The model's internal retry for invalid JSON is not counted among the 20.
-Long conversations drop their oldest rounds, but the samples are always kept.
+**Why each reply gets a fresh prompt.** A model shown its own failed answers
+again and again starts copying them, and then returns the same answer every
+time. So the history is not replayed as chat turns. Every prompt is
+self-contained: the emails, the model's previous attempt, what went wrong with
+it, and a short list (last three) of patterns that already failed.
+
+**Breaking a loop.** Each answer is compared (ignoring its name) with all the
+earlier failed ones. A repeat:
+
+- raises the temperature for the next reply, from 0.2 by 0.25 for each repeat
+  in a row, up to 0.9 (local servers otherwise answer the same prompt the
+  same way);
+- shrinks the next prompt to **one** email the pattern still fails on and
+  tells the model its answer was identical and a materially different
+  pattern is needed.
+
+A new answer puts the temperature and the full prompt back. A repeat still
+counts as one of the 20 replies. The Parsers page shows each reply's
+temperature and a note when it was a repeat.
+
 If the hub restarts mid-run, the run is marked interrupted.
 
-The whole conversation is stored (`regex_negotiations`) and shown under
-**Parsers → Last conversation with the model**.
+The conversation is stored (`regex_negotiations`), with the sample emails
+saved once, and shown under **Parsers → Last conversation with the model**.
 
 ### Approving
 
