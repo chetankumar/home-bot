@@ -130,6 +130,8 @@ Finance only ever used a local model.
 
 Finance uses the `local` alias in two places:
 - as a fallback for alerts the regex parsers don't recognise;
+- to write new regexes from those alerts (the regex compiler, which tests
+  each regex and sends failures back to the model; you approve the result);
 - to suggest categories for merchant names.
 
 If the local server is down, sync still works and the unrecognised emails wait
@@ -328,6 +330,12 @@ the plain-text layout, then the subject line, then asks the local model; only th
 emails it still can't read wait for you. The parsers in
 `apps/finance/parsers.py` and `apps/finance/amazon.py` can then be tightened
 against them, with redacted samples added under `tests/fixtures/`.
+
+8. **How emails are read.** Every email goes through regexes first, best
+   score first. Whatever they miss is logged and read by the local model, and
+   **Parsers** can ask the model to write new regexes from those misses,
+   retrying with feedback up to 20 replies; you approve any new regex before
+   it is used. Details: [docs/finance-parsing.md](docs/finance-parsing.md).
 
 ## Layout
 
