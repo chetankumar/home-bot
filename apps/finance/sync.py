@@ -146,10 +146,12 @@ def _process_email(
     ctx: AppContext, conn: sqlite3.Connection, gmail_id: str, ai: AIState | None
 ) -> str:
     row = conn.execute("SELECT * FROM emails WHERE gmail_id = ?", (gmail_id,)).fetchone()
-    extra = [r.as_parser() for r in learn.bank_rules(conn)]
-    result: Parsed | str | None = parse_email(row["subject"], row["body"], extra)
+    rules = [r.as_parser() for r in learn.bank_rules(conn)]  # best-scoring first
+    result: Parsed | str | None = parse_email(row["subject"], row["body"], rules)
     source, error = "regex", None
-    missed = result is None  # no built-in or approved regex read it: log it for the regex compiler
+    missed = result is None  # no regex read it: log it for the regex compiler
+    if isinstance(result, Parsed):
+        learn.hit(conn, "bank", result.parser)
     if result is None and ai is not None and ai.enabled:
         source = "ai"
         try:
