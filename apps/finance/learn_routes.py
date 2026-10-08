@@ -91,7 +91,11 @@ def build_learn_router(ctx: AppContext) -> APIRouter:
         headers = None
         if not context["running"] and request.headers.get("HX-Request") and request.query_params.get("watch"):
             headers = {"HX-Refresh": "true"}  # finished: reload to show the proposals
-        return ctx.render(request, "_learn_status.html", headers=headers, **context)
+        with ctx.db() as conn:
+            missed = conn.execute("SELECT COUNT(*) FROM parse_misses WHERE kind = ?", (kind,)).fetchone()[0]
+        return ctx.render(
+            request, "_learn_status.html", headers=headers, s=context, can_start=ctx.ai.available() and missed > 0
+        )
 
     @router.post("/parsers/negotiations/{nid}/dismiss")
     def dismiss(nid: int, to: str = Form("/")):
