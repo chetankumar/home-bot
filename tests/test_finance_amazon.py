@@ -305,6 +305,23 @@ def test_manual_link_unlink_and_match_now(fin):  # noqa: F811
     assert rows(fin, "SELECT order_id FROM transactions WHERE id = ?", t)[0]["order_id"] is None
 
 
+def test_marking_an_order_not_real_releases_its_payment_and_restore_matches_again(fin):  # noqa: F811
+    client = seeded(fin)
+    oid = rows(fin, "SELECT id FROM orders WHERE order_number = '171-7654321-0987654'")[0]["id"]
+    t = add_txn(fin, 3, 450)
+    client.post(f"{BASE}/orders/match")
+    assert rows(fin, "SELECT order_id FROM transactions WHERE id = ?", t)[0]["order_id"] == oid
+    client.post(f"{BASE}/orders/{oid}/status", data={"status": "cancelled"})
+    assert rows(fin, "SELECT status FROM orders WHERE id = ?", oid)[0]["status"] == "cancelled"
+    assert rows(fin, "SELECT order_id FROM transactions WHERE id = ?", t)[0]["order_id"] is None
+    client.post(f"{BASE}/orders/match")
+    assert rows(fin, "SELECT order_id FROM transactions WHERE id = ?", t)[0]["order_id"] is None
+    client.post(f"{BASE}/orders/{oid}/status", data={"status": "placed"})
+    client.post(f"{BASE}/orders/match")
+    assert rows(fin, "SELECT order_id FROM transactions WHERE id = ?", t)[0]["order_id"] == oid
+    assert client.post(f"{BASE}/orders/9999/status", data={"status": "cancelled"}).status_code == 404
+
+
 def test_matched_transaction_shows_items_and_prefills_the_narration(fin):  # noqa: F811
     client = seeded(fin)
     html = client.get(f"{BASE}/transactions?month=2026-10").text

@@ -111,6 +111,19 @@ def build_order_router(ctx: AppContext) -> APIRouter:
             matching.unlink(conn, order_id)
         return back(msg="Unlinked.")
 
+    @router.post("/orders/{order_id}/status")
+    def set_status(order_id: int, status: str = Form("")):
+        """Recategorize an order by hand: 'cancelled' takes it out of matching, 'placed' restores it."""
+        if status not in ("cancelled", "placed"):
+            return back(msg="Pick a status for the order.")
+        with ctx.db() as conn:
+            if conn.execute("SELECT 1 FROM orders WHERE id = ?", (order_id,)).fetchone() is None:
+                raise HTTPException(404)
+            conn.execute("UPDATE orders SET status = ? WHERE id = ?", (status, order_id))
+            if status == "cancelled":
+                matching.unlink(conn, order_id)  # a cancelled order shouldn't keep a payment
+        return back(msg="Marked as not a real order." if status == "cancelled" else "Restored.")
+
     @router.post("/orders/{order_id}/link")
     def link(order_id: int, txn_id: str = Form("")):
         try:

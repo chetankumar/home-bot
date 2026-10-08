@@ -65,6 +65,10 @@
         </form>
         {% endif %}
       {% endif %}
+      <form method="post" action="{{ app_url('/orders/' ~ o.id ~ '/status') }}">
+        {% if o.status == "cancelled" %}<input type="hidden" name="status" value="placed"><button class="small secondary">Restore</button>
+        {% else %}<input type="hidden" name="status" value="cancelled"><button class="small secondary" title="Cancel it so it's never matched to a payment">Not a real order</button>{% endif %}
+      </form>
     </td>
   </tr>
   {% endfor %}
