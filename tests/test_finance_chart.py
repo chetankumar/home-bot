@@ -52,7 +52,7 @@ def test_dashboard_has_the_chart_with_legend_summary_and_table(dash):
                  "Table view", "Run-rate:"):
         assert want in html
     assert html.index("Spent so far") > html.index("Projected month-end")  # below the stat cards
-    assert 'src="/static/charts.js"' in html  # loaded by the shell, not per page
+    assert 'src="/static/charts.js?v=' in html  # loaded by the shell, not per page
 
 
 def test_only_real_spending_is_charted(dash):

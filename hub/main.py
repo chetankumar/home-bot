@@ -56,10 +56,18 @@ class Hub:
     registry: Registry = field(init=False)
 
     def template_globals(self) -> dict[str, Any]:
-        return {"hub_nav": self.nav, "hub_tz": self.config.tz}
+        return {"hub_nav": self.nav, "hub_tz": self.config.tz, "static_v": static_version}
 
     def nav(self) -> list[Any]:
         return [a for a in self.registry.apps.values() if a.status == "loaded"]
+
+
+def static_version(name: str) -> str:
+    """`?v=<mtime>` for a hub static file, so browsers refetch it when it changes."""
+    try:
+        return f"/static/{name}?v={int((STATIC_DIR / name).stat().st_mtime)}"
+    except OSError:
+        return f"/static/{name}"
 
 
 def build_hub(config: Config) -> Hub:
