@@ -106,6 +106,9 @@ def _process_email(ctx: AppContext, conn: sqlite3.Connection, gmail_id: str, use
     row = conn.execute("SELECT * FROM order_emails WHERE gmail_id = ?", (gmail_id,)).fetchone()
     parsed: Any = amazon.parse_email(row["subject"], row["body"], learn.amazon_rules(conn))
     parser = parsed.parser if isinstance(parsed, amazon.ParsedOrder) else None
+    if isinstance(parsed, amazon.ParsedOrder):
+        for name in parsed.rules_hit:  # score the regexes that read it (before the model touches it)
+            learn.hit(conn, "amazon", name)
     # The model fills in what the regexes couldn't read: unreadable emails, or an order
     # whose items came only from the subject line, or whose total is missing.
     weak = parsed is None or (

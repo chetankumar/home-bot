@@ -39,12 +39,17 @@ def build_learn_router(ctx: AppContext) -> APIRouter:
                 " LEFT JOIN order_emails o ON m.kind = 'amazon' AND o.gmail_id = m.gmail_id"
                 " ORDER BY m.noted_at DESC LIMIT 50"
             )]
+            for k in KINDS:
+                learn.ensure_seeded(conn, k)  # so a fresh install shows the built-ins too
             rules = [dict(r) for r in conn.execute(
-                "SELECT * FROM learned_parsers WHERE status != 'rejected' ORDER BY id DESC")]
+                "SELECT * FROM learned_parsers WHERE status != 'rejected' ORDER BY matches DESC, id")]
         for r in rules:
             r["preview"] = json.loads(r["preview"]) if r["preview"] else None
+        proposed = [r for r in rules if r["status"] == "proposed"]
+        scorecard = {k: [r for r in rules if r["kind"] == k and r["status"] != "proposed"] for k in KINDS}
         return ctx.render(
-            request, "parsers.html", kinds=KINDS, misses=misses, recent=recent, rules=rules, msg=msg,
+            request, "parsers.html", kinds=KINDS, misses=misses, recent=recent, proposed=proposed,
+            scorecard=scorecard, msg=msg,
             ai_ready=ctx.ai.available(),
         )
 
@@ -80,6 +85,11 @@ def build_learn_router(ctx: AppContext) -> APIRouter:
     def reject(rule_id: int):
         decide(rule_id, "rejected")
         return back("Rejected.")
+
+    @router.post("/parsers/{rule_id}/enable")
+    def enable(rule_id: int):
+        decide(rule_id, "active")
+        return back("Enabled.")
 
     @router.post("/parsers/{rule_id}/disable")
     def disable(rule_id: int):
