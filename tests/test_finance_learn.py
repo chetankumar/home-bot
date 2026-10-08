@@ -46,8 +46,12 @@ def test_proposal_waits_for_approval_then_reads_new_emails(fin):  # noqa: F811
     seed_misses(fin)
     client = login(TestClient(fin.app))
     fin.ollama.outputs = [PROPOSAL]
-    r = client.post(f"{BASE}/parsers/propose", data={"kind": "bank"}, follow_redirects=True)
-    assert "ready to review" in r.text
+    assert client.post(f"{BASE}/parsers/propose", data={"kind": "bank"}, follow_redirects=False).status_code == 303
+    for _ in range(200):  # the button started the job in the background; wait for it
+        if not fin.ctx.scheduler.is_running("learn_bank"):
+            break
+        time.sleep(0.05)
+    assert "Proposal ready after 1 reply" in client.get(f"{BASE}/parsers").text
     sent = fin.ollama.calls[-1][2][-1].content
     assert "ZOMATO" in sent and "SWIGGY" in sent
     with fin.ctx.db() as conn:
@@ -72,9 +76,10 @@ def test_bad_proposals_are_rejected(fin):  # noqa: F811
     seed_misses(fin)
     wrong_amount = PROPOSAL["parsers"][0] | {"pattern": r"happened at (?P<amount>\d+)"}
     nested = PROPOSAL["parsers"][0] | {"pattern": r"(?P<amount>(\d+)+)"}
-    fin.ollama.outputs = [{"parsers": [wrong_amount, nested]}]
-    assert "didn't hold up" in learn.propose(fin.ctx, "bank")
-    assert count(fin.ctx, "SELECT COUNT(*) FROM learned_parsers WHERE builtin = 0") == 0
+    fin.ollama.outputs = [{"parsers": [wrong_amount, nested]}, PROPOSAL]
+    assert "ready to review" in learn.propose(fin.ctx, "bank")
+    # Only the second answer was good; the first two proposals were never saved.
+    assert count(fin.ctx, "SELECT COUNT(*) FROM learned_parsers WHERE builtin = 0") == 1
 
 
 def test_amazon_total_regex(fin):  # noqa: F811
@@ -107,6 +112,7 @@ def test_parsers_page_renders(fin):  # noqa: F811
 
 # -- scorecard ------------------------------------------------------------------------------
 import random  # noqa: E402
+import time  # noqa: E402
 
 import pytest  # noqa: E402
 
@@ -192,3 +198,118 @@ def test_scorecard_page_lists_builtins_and_can_disable(fin):  # noqa: F811
     assert scores(fin) and count(fin.ctx, "SELECT status FROM learned_parsers WHERE id = ?", rid) == "disabled"
     client.post(f"{BASE}/parsers/{rid}/enable")
     assert count(fin.ctx, "SELECT status FROM learned_parsers WHERE id = ?", rid) == "active"
+
+
+# -- negotiation: the model is told why a proposal failed and tries again --------------------
+def last_negotiation(fin, kind="bank"):  # noqa: F811
+    with fin.ctx.db() as conn:
+        return dict(conn.execute("SELECT * FROM regex_negotiations WHERE kind = ? ORDER BY id DESC", (kind,)).fetchone())
+
+
+def test_failure_is_sent_back_and_the_model_tries_again(fin):  # noqa: F811
+    seed_misses(fin)
+    bad = PROPOSAL["parsers"][0] | {"pattern": r"this wording is not in the emails (?P<amount>\d+)"}
+    fin.ollama.outputs = [{"parsers": [bad]}, PROPOSAL]
+    assert "2 model replies" in learn.negotiate(fin.ctx, "bank")
+    first, second = fin.ollama.calls[-2][2], fin.ollama.calls[-1][2]
+    assert len(second) == len(first) + 2  # + the model's answer and our feedback
+    feedback = second[-1].content
+    assert "read only 0 of 2" in feedback and "did not match email 1" in feedback and "ZOMATO" in feedback
+    n = last_negotiation(fin)
+    assert (n["status"], n["replies"]) == ("succeeded", 2)
+    assert count(fin.ctx, "SELECT COUNT(*) FROM learned_parsers WHERE builtin = 0 AND status = 'proposed'") == 1
+
+
+@pytest.mark.parametrize("pattern,fragment", [
+    (r"(?P<amount>(\d+)+)", "nests quantifiers"),
+    (r"(?P<amount>[", "not a valid Python regex"),
+    (r"inr (\d+)", "no named group (?P<amount>"),
+    (r"happened at (?P<amount>\d+)", "read only 0 of 2"),  # parses 'ZOMATO' etc. as no digits
+])
+def test_feedback_names_the_specific_problem(fin, pattern, fragment):  # noqa: F811
+    seed_misses(fin)
+    fin.ollama.outputs = [{"parsers": [PROPOSAL["parsers"][0] | {"pattern": pattern}]}, PROPOSAL]
+    learn.negotiate(fin.ctx, "bank")
+    assert fragment in fin.ollama.calls[-1][2][-1].content
+
+
+def test_amount_that_disagrees_with_the_earlier_reading_is_flagged(fin):  # noqa: F811
+    seed_misses(fin)  # the model read 349 and 120
+    off = PROPOSAL["parsers"][0] | {"pattern": r"a spend of inr \d(?P<amount>\d+) happened"}  # drops a digit
+    fin.ollama.outputs = [{"parsers": [off]}, PROPOSAL]
+    learn.negotiate(fin.ctx, "bank")
+    assert "your amount was 49 but it is 349" in fin.ollama.calls[-1][2][-1].content
+
+
+def test_it_gives_up_after_twenty_replies_and_the_dashboard_says_so(fin):  # noqa: F811
+    seed_misses(fin)
+    bad = {"parsers": [PROPOSAL["parsers"][0] | {"pattern": r"never matches (?P<amount>\d+)"}]}
+    fin.ollama.outputs = [bad] * 25
+    before = len(fin.ollama.calls)
+    assert "20 replies" in learn.negotiate(fin.ctx, "bank")
+    assert len(fin.ollama.calls) - before == 20 and len(fin.ollama.outputs) == 5
+    n = last_negotiation(fin)
+    assert (n["status"], n["replies"], n["dismissed"]) == ("failed", 20, 0)
+    assert count(fin.ctx, "SELECT COUNT(*) FROM learned_parsers WHERE builtin = 0") == 0
+
+    client = login(TestClient(fin.app))
+    html = client.get(f"{BASE}/").text
+    assert "gave up on HDFC alerts after 20 model replies" in html
+    assert f"#neg-{n['id']}" in client.get(f"{BASE}/").text
+    assert "gave up" in client.get(f"{BASE}/parsers").text
+    client.post(f"{BASE}/parsers/negotiations/{n['id']}/dismiss", data={"to": "/"})
+    assert "gave up on HDFC" not in client.get(f"{BASE}/").text
+
+
+def test_success_clears_an_older_failure(fin):  # noqa: F811
+    seed_misses(fin)
+    bad = {"parsers": [PROPOSAL["parsers"][0] | {"pattern": r"never matches (?P<amount>\d+)"}]}
+    fin.ollama.outputs = [bad] * 20
+    learn.negotiate(fin.ctx, "bank")
+    fin.ollama.outputs = [PROPOSAL]
+    learn.negotiate(fin.ctx, "bank")
+    assert "gave up" not in login(TestClient(fin.app)).get(f"{BASE}/").text
+
+
+def test_unreachable_model_is_reported_but_is_not_giving_up(fin):  # noqa: F811
+    seed_misses(fin)
+    fin.ollama.outputs = []  # FakeProvider raises when its queue is empty
+    assert "not available" in learn.negotiate(fin.ctx, "bank")
+    n = last_negotiation(fin)
+    assert (n["status"], n["replies"]) == ("unavailable", 0)
+    html = login(TestClient(fin.app)).get(f"{BASE}/").text
+    assert "could not reach the local model" in html and "gave up" not in html
+
+
+def test_amazon_negotiation(fin):  # noqa: F811
+    from apps.finance import orders as orders_mod
+
+    body = "Order # 402-1234567-8901234\nSteel bottle\nQuantity: 1\nYou paid ₹ 899.00 today"
+    fin.gmail.add("o1", body, at(2), subject='Ordered: "Steel bottle"', sender="auto-confirm@amazon.in")
+    orders_mod.sync_orders(fin.ctx, at(3))
+    wrong = {"name": "paid", "total_pattern": r"you owe ₹\s*(?P<total>[\d,.]+)", "item_pattern": None}
+    right = {"name": "paid", "total_pattern": r"you paid\s*₹\s*(?P<total>[\d,.]+)", "item_pattern": None}
+    fin.ollama.outputs = [wrong, right]
+    assert "2 model replies" in learn.negotiate(fin.ctx, "amazon")
+    assert "did not match email 1" in fin.ollama.calls[-1][2][-1].content
+
+
+def test_long_history_drops_old_rounds_but_keeps_the_samples():
+    msgs = [{"role": "user", "content": "SAMPLES"}]
+    for i in range(10):
+        msgs += [{"role": "assistant", "content": f"a{i}" * 3000}, {"role": "user", "content": f"f{i}" * 3000}]
+    out = learn._trim(msgs)
+    assert out[0]["content"] == "SAMPLES" and out[-1] == msgs[-1] and len(out) < len(msgs)
+
+
+def test_status_partial_reports_progress_and_reloads_when_done(fin):  # noqa: F811
+    seed_misses(fin)
+    client = login(TestClient(fin.app))
+    html = client.get(f"{BASE}/parsers/status/bank").text
+    assert "Ask the model for regexes" in html and "hx-get" not in html  # idle: no polling
+    with fin.ctx.db() as conn:
+        conn.execute("INSERT INTO regex_negotiations(kind, status, replies) VALUES ('bank', 'running', 7)")
+    html = client.get(f"{BASE}/parsers/status/bank").text  # a run row with no live job: shown as interrupted
+    assert "gave up" in html
+    r = client.get(f"{BASE}/parsers/status/bank?watch=1", headers={"HX-Request": "true"})
+    assert r.headers.get("HX-Refresh") == "true"

@@ -16,13 +16,14 @@ from __future__ import annotations
 import json
 import re
 import sqlite3
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from typing import Literal
 
 from pydantic import BaseModel, Field
 
 from hub.plugin import AppContext
-from hub.services.ai import AIError
+from hub.services.ai import AIError, ExtractionError
 
 from . import amazon
 from .amazon import AmazonRule, amazon_items
@@ -205,103 +206,243 @@ def _known_amount(conn: sqlite3.Connection, gmail_id: str) -> int | None:
     return row[0] if row else None
 
 
-def _bank_check(rule: BankRule, samples: list[sqlite3.Row], conn: sqlite3.Connection) -> tuple[int, str | None]:
+@dataclass
+class Check:
+    """How a candidate regex fared on the sample emails."""
+
+    hits: int = 0
+    preview: str | None = None
+    missed: list[int] = field(default_factory=list)  # 1-based numbers of emails it did not read
+    wrong: list[str] = field(default_factory=list)  # emails it read differently from the earlier reading
+
+
+def _bank_check(rule: BankRule, samples: list[sqlite3.Row], conn: sqlite3.Connection) -> Check:
     """How many samples the rule reads (agreeing with the model's earlier reading, if any)."""
-    hits, preview = 0, None
+    out = Check()
     _name, rx, build = rule.as_parser()
-    for s in samples:
+    for i, s in enumerate(samples, 1):
         text = collapse(s["body"])
         m = rx.search(text)
-        if not m:
-            continue
-        try:
-            p = build(m, text)
-        except ValueError:
+        p = None
+        if m:
+            try:
+                p = build(m, text)
+            except ValueError:
+                p = None
+        if p is None or p.amount_paise <= 0:
+            out.missed.append(i)
             continue
         known = _known_amount(conn, s["gmail_id"])
-        if p.amount_paise <= 0 or (known is not None and known != p.amount_paise):
+        if known is not None and known != p.amount_paise:
+            out.wrong.append(f"email {i}: your amount was {p.amount_paise / 100:g} but it is {known / 100:g}")
             continue
-        hits += 1
-        preview = preview or json.dumps(
+        out.hits += 1
+        out.preview = out.preview or json.dumps(
             {"subject": s["subject"], "amount": p.amount_paise / 100, "direction": p.direction,
              "instrument": p.instrument, "account": p.account_mask, "counterparty": p.counterparty_raw,
              "date": p.occurred_on.isoformat() if p.occurred_on else None})
-    return hits, preview
+    return out
 
 
-def _amazon_check(rule: AmazonRule, samples: list[sqlite3.Row]) -> tuple[int, str | None]:
-    hits, preview = 0, None
-    for s in samples:
+def _amazon_check(rule: AmazonRule, samples: list[sqlite3.Row]) -> Check:
+    out = Check()
+    for i, s in enumerate(samples, 1):
         total = rule.total.search(collapse(s["body"])) if rule.total else None
-        items = list(amazon_items(rule, s["body"]))
+        items = amazon_items(rule, s["body"])
         try:
             paise = to_paise(total.group("total")) if total else None
         except ValueError:
             paise = None
-        if paise or items:
-            hits += 1
-            preview = preview or json.dumps(
-                {"subject": s["subject"], "total": paise / 100 if paise else None, "items": [i.title for i in items][:5]})
-    return hits, preview
+        if not (paise or items):
+            out.missed.append(i)
+            continue
+        out.hits += 1
+        out.preview = out.preview or json.dumps(
+            {"subject": s["subject"], "total": paise / 100 if paise else None, "items": [it.title for it in items][:5]})
+    return out
 
 
-def propose(ctx: AppContext, kind: str) -> str:
-    """Ask the model for regexes from up to 10 missed emails. Returns a one-line result."""
+def _snippet(sample: sqlite3.Row, kind: str) -> str:
+    """The part of an unread email worth showing the model: around the first amount, else the start."""
+    text = mask(amazon.collapse_keep_lines(sample["body"]) if kind == "amazon" else collapse(sample["body"]))
+    m = re.search(r"(?:rs\.?|inr|₹)\s*\d", text, re.I)
+    start = max(0, (m.start() if m else 0) - 100)
+    return text[start : start + 260].replace("\n", " / ")
+
+
+@dataclass
+class Verdict:
+    ok: bool
+    notes: list[str]
+    row: tuple | None = None  # what to insert when ok
+
+
+def _evaluate(
+    kind: str, cand: tuple, samples: list[sqlite3.Row], conn: sqlite3.Connection, need: int
+) -> Verdict:
+    """Test one proposed regex against the samples. Failures say exactly what to fix."""
+    name, pattern, item_pattern, direction, instrument = cand
+    name = re.sub(r"\W+", "_", (name or "").strip().lower()).strip("_")[:40] or kind
+    if kind == "bank":
+        if not pattern:
+            return Verdict(False, [f"'{name}': the pattern is empty."])
+        if instrument not in INSTRUMENTS:
+            return Verdict(False, [f"'{name}': instrument must be one of {', '.join(INSTRUMENTS)}."])
+        rx = compile_pattern(pattern, {"amount"})
+        if rx is None:
+            return Verdict(False, [f"'{name}': {_why_not_compiled(pattern, 'amount')}"])
+        check = _bank_check(BankRule(0, name, rx, direction, instrument), samples, conn)
+    else:
+        total = compile_pattern(pattern, {"total"})
+        items = compile_pattern(item_pattern, {"title"}, multiline=True)
+        if not (total or items):
+            why = []
+            if pattern:
+                why.append(f"total_pattern: {_why_not_compiled(pattern, 'total')}")
+            if item_pattern:
+                why.append(f"item_pattern: {_why_not_compiled(item_pattern, 'title')}")
+            return Verdict(False, [f"'{name}': " + ("; ".join(why) or "give a total_pattern and/or an item_pattern.")])
+        check = _amazon_check(AmazonRule(0, name, total, items), samples)
+        pattern, item_pattern = (pattern if total else ""), (item_pattern if items else None)
+    if check.hits >= need:
+        return Verdict(True, [], (name, pattern, item_pattern, direction, instrument, check.hits, check.preview))
+    notes = [f"'{name}' read only {check.hits} of {len(samples)} emails (it must read at least {need})."]
+    notes += check.wrong
+    for i in check.missed[:3]:
+        notes.append(f"it did not match email {i}, which contains: \"{_snippet(samples[i - 1], kind)}\"")
+    if len(check.missed) > 3:
+        notes.append(f"... and {len(check.missed) - 3} more emails did not match.")
+    return Verdict(False, notes)
+
+
+def _why_not_compiled(pattern: str, group: str) -> str:
+    if len(pattern) > MAX_PATTERN:
+        return f"the pattern is longer than {MAX_PATTERN} characters; make it shorter."
+    if _NESTED.search(pattern):
+        return "it nests quantifiers like (a+)+, which is not allowed; rewrite without them."
+    try:
+        rx = re.compile(pattern, re.I)
+    except re.error as e:
+        return f"it is not a valid Python regex ({e})."
+    return f"it has no named group (?P<{group}>...); the group {group} is required (found: {sorted(rx.groupindex) or 'none'})."
+
+
+MAX_REPLIES = 20
+HISTORY_CHARS = 60_000  # keep the conversation within a local model's context
+
+
+def _trim(messages: list[dict]) -> list[dict]:
+    """Drop the oldest answer/feedback rounds (never the samples) when the history gets long."""
+    msgs = list(messages)
+    while len(msgs) > 3 and sum(len(m["content"]) for m in msgs) > HISTORY_CHARS:
+        del msgs[1:3]
+    return msgs
+
+
+def _record(conn: sqlite3.Connection, nid: int, **cols: object) -> None:
+    sets = ", ".join(f"{k} = ?" for k in cols)
+    conn.execute(f"UPDATE regex_negotiations SET {sets} WHERE id = ?", (*cols.values(), nid))
+
+
+def negotiate(ctx: AppContext, kind: str) -> str:
+    """Ask the model for regexes from up to 10 missed emails, and keep going until one holds up.
+
+    After every reply each proposal is tested against the same emails. If none passes, the exact
+    failures go back to the model and it answers again, up to MAX_REPLIES model replies. Passing
+    regexes are saved as proposals (they still need approval). Returns a one-line result; the
+    full conversation is kept in regex_negotiations for the Parsers page and dashboard.
+    """
     if kind not in ("bank", "amazon"):
         raise ValueError(kind)
     with ctx.db() as conn:
         if conn.execute("SELECT 1 FROM learned_parsers WHERE kind = ? AND status = 'proposed'", (kind,)).fetchone():
             return "Approve or reject the pending proposals first."
         samples = pick_samples(conn, kind)
-    if not samples:
-        return "No missed emails to learn from."
+        if not samples:
+            return "No missed emails to learn from."
+        conn.execute(  # a run that died with the process can't still be going: only one job runs at a time
+            "UPDATE regex_negotiations SET status = 'failed', last_error = 'Interrupted (the hub restarted).',"
+            " finished_at = datetime('now') WHERE kind = ? AND status = 'running'", (kind,))
+        nid = conn.execute(
+            "INSERT INTO regex_negotiations(kind, samples) VALUES (?, ?)", (kind, len(samples))).lastrowid
     blocks = "\n\n".join(
         _sample_block(i, s["subject"], s["body"], 3000 if kind == "amazon" else 2500, kind == "amazon")
         for i, s in enumerate(samples, 1)
     )
-    try:
-        if kind == "bank":
-            got = ctx.ai.extract(blocks, schema=BankProposals, system=BANK_SYSTEM, max_tokens=900)
-            candidates = [(p.name, p.pattern, None, p.direction, p.instrument) for p in got.parsers]
-        else:
-            got = ctx.ai.extract(blocks, schema=AmazonProposal, system=AMAZON_SYSTEM, max_tokens=700)
-            candidates = [(got.name, got.total_pattern, got.item_pattern, None, None)]
-    except AIError as e:
-        return f"Local model not available: {e}"
+    schema, system, tokens = (
+        (BankProposals, BANK_SYSTEM, 900) if kind == "bank" else (AmazonProposal, AMAZON_SYSTEM, 700)
+    )
     need = min(2, len(samples))
-    saved, rejected = 0, 0
-    with ctx.db() as conn:
-        for name, pattern, item_pattern, direction, instrument in candidates:
-            name = re.sub(r"\W+", "_", name.strip().lower()).strip("_")[:40] or kind
-            if kind == "bank":
-                rx = compile_pattern(pattern, {"amount"})
-                if rx is None or instrument not in INSTRUMENTS:
-                    rejected += 1
-                    continue
-                hits, preview = _bank_check(BankRule(0, name, rx, direction, instrument), samples, conn)
-            else:
-                total = compile_pattern(pattern, {"total"})
-                items = compile_pattern(item_pattern, {"title"}, multiline=True)
-                if not (total or items):
-                    rejected += 1
-                    continue
-                hits, preview = _amazon_check(AmazonRule(0, name, total, items), samples)
-                pattern = pattern if total else ""
-                item_pattern = item_pattern if items else None
-            if hits < need:
-                rejected += 1
-                continue
-            conn.execute(
-                "INSERT INTO learned_parsers(kind, name, pattern, item_pattern, direction, instrument,"
-                " samples, matched, preview) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                (kind, unique_name(conn, kind, name), pattern, item_pattern, direction, instrument,
-                 len(samples), hits, preview),
+    messages: list[dict] = [{"role": "user", "content": blocks}]
+    feedback = ""
+    for reply in range(1, MAX_REPLIES + 1):
+        try:
+            got = ctx.ai.extract(_trim(messages), schema=schema, system=system, max_tokens=tokens)
+            answer = got.model_dump_json()
+            candidates = (
+                [(p.name, p.pattern, None, p.direction, p.instrument) for p in got.parsers]
+                if kind == "bank"
+                else [(got.name, got.total_pattern, got.item_pattern, None, None)]
             )
-            saved += 1
-    ctx.log.info("regex compiler (%s): %d proposed, %d rejected from %d emails", kind, saved, rejected, len(samples))
-    if not saved:
-        return f"The model's regexes didn't hold up on the {len(samples)} sample emails ({rejected} rejected)."
-    return f"{saved} regex proposal(s) ready to review, tested on {len(samples)} emails."
+            verdicts = []
+            with ctx.db() as conn:
+                verdicts = [_evaluate(kind, c, samples, conn, need) for c in candidates]
+                saved = 0
+                for v in verdicts:
+                    if v.ok:
+                        name, pattern, item_pattern, direction, instrument, hits, preview = v.row
+                        conn.execute(
+                            "INSERT INTO learned_parsers(kind, name, pattern, item_pattern, direction, instrument,"
+                            " samples, matched, preview) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                            (kind, unique_name(conn, kind, name), pattern, item_pattern, direction, instrument,
+                             len(samples), hits, preview),
+                        )
+                        saved += 1
+            if not candidates:
+                feedback = "You returned no patterns. Write at least one pattern."
+            else:
+                feedback = "\n".join(f"- {n}" for v in verdicts if not v.ok for n in v.notes)
+        except ExtractionError as e:  # the model's answer wasn't usable JSON, even after one retry
+            answer, saved = "", 0
+            feedback = f"Your reply could not be read as the required JSON ({e}). Answer again in that format."
+        except AIError as e:
+            with ctx.db() as conn:
+                _record(conn, nid, status="unavailable", replies=reply - 1, last_error=str(e),
+                        transcript=json.dumps(messages), finished_at=_now())
+            return f"Local model not available: {e}"
+        if saved:
+            messages.append({"role": "assistant", "content": answer})
+            with ctx.db() as conn:
+                _record(conn, nid, status="succeeded", replies=reply, last_error=None,
+                        transcript=json.dumps(messages), finished_at=_now())
+                conn.execute(  # the problem is solved: older failures for this source no longer matter
+                    "UPDATE regex_negotiations SET dismissed = 1 WHERE kind = ? AND id != ?"
+                    " AND status IN ('failed', 'unavailable')", (kind, nid))
+            ctx.log.info("regex compiler (%s): %d proposal(s) after %d repl%s", kind, saved, reply,
+                         "y" if reply == 1 else "ies")
+            return f"{saved} regex proposal(s) ready to review, tested on {len(samples)} emails ({reply} model repl{'y' if reply == 1 else 'ies'})."
+        if answer:
+            messages.append({"role": "assistant", "content": answer})
+        messages.append({
+            "role": "user",
+            "content": "None of that worked:\n" + feedback + "\nFix these problems and answer again in the same format.",
+        })
+        with ctx.db() as conn:
+            _record(conn, nid, replies=reply, last_error=feedback, transcript=json.dumps(messages))
+    with ctx.db() as conn:
+        _record(conn, nid, status="failed", replies=MAX_REPLIES, transcript=json.dumps(messages),
+                finished_at=_now())
+    ctx.log.warning("regex compiler (%s): gave up after %d replies", kind, MAX_REPLIES)
+    return f"The model could not produce a working regex in {MAX_REPLIES} replies."
+
+
+def _now() -> str:
+    return datetime.now(UTC).strftime("%Y-%m-%d %H:%M:%S")  # same clock as SQLite's datetime('now')
+
+
+def propose(ctx: AppContext, kind: str) -> str:
+    """Kept for callers that want the result inline; same as negotiate."""
+    return negotiate(ctx, kind)
 
 
 def clear_covered(conn: sqlite3.Connection, kind: str) -> int:

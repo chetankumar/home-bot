@@ -58,7 +58,9 @@ _DATE_FORMATS = [
 ]
 
 
-def to_paise(amount: str) -> int:
+def to_paise(amount: str | None) -> int:
+    if not amount:  # e.g. a named group that didn't take part in the match
+        raise ValueError(f"bad amount {amount!r}")
     try:
         value = Decimal(amount.replace(",", ""))
     except InvalidOperation:

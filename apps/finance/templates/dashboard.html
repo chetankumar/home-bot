@@ -61,6 +61,21 @@
 </div>
 {% endif %}
 
+{% for f in neg_failures %}
+<div class="flash tone-{{ 'bad' if f.status == 'failed' else 'warn' }}">
+  {% if f.status == "failed" %}
+    The regex compiler gave up on {{ "HDFC alerts" if f.kind == "bank" else "Amazon orders" }} after {{ f.replies }} model replies.
+    <a href="{{ app_url('/parsers') }}#neg-{{ f.id }}">View the conversation</a>
+  {% else %}
+    The regex compiler could not reach the local model for {{ "HDFC alerts" if f.kind == "bank" else "Amazon orders" }}: {{ f.last_error }}
+  {% endif %}
+  <form method="post" action="{{ app_url('/parsers/negotiations/' ~ f.id ~ '/dismiss') }}" style="display:inline">
+    <input type="hidden" name="to" value="/">
+    <button class="secondary small">Dismiss</button>
+  </form>
+</div>
+{% endfor %}
+
 <div class="columns">
   {% call ui.card("By category") %}
     {{ ui.bars(categories, empty="No spends this month yet.") }}

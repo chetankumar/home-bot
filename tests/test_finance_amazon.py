@@ -443,7 +443,7 @@ def wait_idle(fin, job="orders"):  # noqa: F811
 
 def test_orders_have_their_own_scheduled_job(fin):  # noqa: F811
     jobs = {j["job_id"]: j for j in fin.app.state.hub.scheduler.jobs() if j["app_id"] == "finance"}
-    assert set(jobs) == {"sync", "orders"}
+    assert set(jobs) == {"sync", "orders", "learn_bank", "learn_amazon"}  # the learn_* jobs only run on demand
     assert "hour='19'" in jobs["orders"]["trigger"] and "minute='45'" in jobs["orders"]["trigger"]
 
 

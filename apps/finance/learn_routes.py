@@ -41,6 +41,9 @@ def build_learn_router(ctx: AppContext) -> APIRouter:
             )]
             for k in KINDS:
                 learn.ensure_seeded(conn, k)  # so a fresh install shows the built-ins too
+            transcripts = {r["kind"]: json.loads(r["transcript"] or "[]") for r in conn.execute(
+                "SELECT kind, transcript FROM regex_negotiations WHERE id IN"
+                " (SELECT MAX(id) FROM regex_negotiations GROUP BY kind)")}
             rules = [dict(r) for r in conn.execute(
                 "SELECT * FROM learned_parsers WHERE status != 'rejected' ORDER BY matches DESC, id")]
         for r in rules:
@@ -49,15 +52,52 @@ def build_learn_router(ctx: AppContext) -> APIRouter:
         scorecard = {k: [r for r in rules if r["kind"] == k and r["status"] != "proposed"] for k in KINDS}
         return ctx.render(
             request, "parsers.html", kinds=KINDS, misses=misses, recent=recent, proposed=proposed,
-            scorecard=scorecard, msg=msg,
+            scorecard=scorecard, msg=msg, transcripts=transcripts,
+            status={k: status_context(k) for k in KINDS},
             ai_ready=ctx.ai.available(),
         )
 
-    @router.post("/parsers/propose")
-    def propose(kind: str = Form(...)):
+    def latest(kind: str) -> dict | None:
+        with ctx.db() as conn:
+            row = conn.execute(
+                "SELECT id, kind, status, replies, samples, last_error, started_at, finished_at"
+                " FROM regex_negotiations WHERE kind = ? ORDER BY id DESC LIMIT 1", (kind,)).fetchone()
+        return dict(row) if row else None
+
+    def status_context(kind: str) -> dict:
+        n = latest(kind)
+        running = ctx.scheduler.is_running(f"learn_{kind}")
+        if n and n["status"] == "running" and not running:  # the process died mid-run
+            n["status"], n["last_error"] = "failed", n["last_error"] or "Interrupted."
+        return {"kind": kind, "label": KINDS[kind], "n": n, "running": running, "max_replies": learn.MAX_REPLIES}
+
+    @router.post("/parsers/propose", response_class=HTMLResponse)
+    def propose(request: Request, kind: str = Form(...)):
         if kind not in KINDS:
             raise HTTPException(404)
-        return back(learn.propose(ctx, kind))
+        with ctx.db() as conn:
+            pending = conn.execute(
+                "SELECT 1 FROM learned_parsers WHERE kind = ? AND status = 'proposed'", (kind,)).fetchone()
+        if pending:
+            return back("Approve or reject the pending proposals first.")
+        ctx.scheduler.run_now(f"learn_{kind}")  # runs in the background; the page shows its progress
+        return back()
+
+    @router.get("/parsers/status/{kind}", response_class=HTMLResponse)
+    def status(request: Request, kind: str):
+        if kind not in KINDS:
+            raise HTTPException(404)
+        context = status_context(kind)
+        headers = None
+        if not context["running"] and request.headers.get("HX-Request") and request.query_params.get("watch"):
+            headers = {"HX-Refresh": "true"}  # finished: reload to show the proposals
+        return ctx.render(request, "_learn_status.html", headers=headers, **context)
+
+    @router.post("/parsers/negotiations/{nid}/dismiss")
+    def dismiss(nid: int, to: str = Form("/")):
+        with ctx.db() as conn:
+            conn.execute("UPDATE regex_negotiations SET dismissed = 1 WHERE id = ?", (nid,))
+        return RedirectResponse(ctx.url(to if to.startswith("/") and not to.startswith("//") else "/"), status_code=303)
 
     def decide(rule_id: int, status: str) -> str:
         with ctx.db() as conn:

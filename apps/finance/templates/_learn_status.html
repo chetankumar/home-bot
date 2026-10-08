@@ -1,0 +1,17 @@
+{% import "components.html" as ui %}
+{% set n = s.n %}
+<div id="learn-{{ s.kind }}"
+  {% if s.running %}hx-get="{{ app_url('/parsers/status/' ~ s.kind) }}?watch=1" hx-trigger="every 2s" hx-swap="outerHTML"{% endif %}>
+  <form method="post" action="{{ app_url('/parsers/propose') }}" class="row">
+    <input type="hidden" name="kind" value="{{ s.kind }}">
+    <button {{ "disabled" if s.running or not can_start }}>{{ "Negotiating…" if s.running else "Ask the model for regexes" }}</button>
+  </form>
+  {% if n %}
+  <p class="muted" id="neg-{{ n.id }}">
+    {% if n.status == "running" %}Model reply {{ n.replies }} of {{ s.max_replies }}, retrying with feedback on what failed…
+    {% elif n.status == "succeeded" %}{{ ui.badge("worked", "good") }} Proposal ready after {{ n.replies }} repl{{ "y" if n.replies == 1 else "ies" }}.
+    {% elif n.status == "unavailable" %}{{ ui.badge("model unavailable", "warn") }} {{ n.last_error }}
+    {% else %}{{ ui.badge("gave up", "bad") }} No working regex after {{ n.replies }} repl{{ "y" if n.replies == 1 else "ies" }}.{% endif %}
+  </p>
+  {% endif %}
+</div>
