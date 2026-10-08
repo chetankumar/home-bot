@@ -19,6 +19,7 @@
   {% set sm = c.summary %}
   <div class="flash tone-{{ sm.tone }} viz-note">
     <span class="viz-icon" aria-hidden="true">{{ sm.icon }}</span>{{ sm.text }}
+    {% if sm.daily %}<div>{{ sm.daily }}</div>{% endif %}
     {% for n in sm.notes %}<div class="muted">{{ n }}</div>{% endfor %}
   </div>
 
@@ -26,6 +27,9 @@
     {% for l in c.legend %}
       {% if l.key == "budget" %}<span><i class="viz-key s-ref" style="border-top-width:1.5px"></i>{{ l.name }}</span>
       {% elif l.key == "needed" %}<span><i class="viz-key s-ref" style="border-top-style:dashed"></i>{{ l.name }}</span>
+      {% elif l.key == "col" %}<span><i class="viz-sw s1"></i>{{ l.name }}</span>
+      {% elif l.key == "over" %}<span><i class="viz-sw over"></i>{{ l.name }}</span>
+      {% elif l.key == "target" %}<span><i class="viz-key s-ref" style="border-top-width:2px"></i>{{ l.name }}</span>
       {% elif l.key == "actual" %}<span><i class="viz-key s1"></i>{{ text.total_name if c.view == "climb" else text.left_name }}</span>
       {% else %}<span><i class="viz-key s{{ c.slot[l.key] }}" style="border-top-style:dashed"></i>{{ l.name }}</span>{% endif %}
     {% endfor %}
@@ -43,11 +47,12 @@
         </g>
         {% if c.y_unit %}<text x="{{ c.ML - 8 }}" y="{{ c.MT - 8 }}" text-anchor="end">{{ c.y_unit }}</text>{% endif %}
         <line class="viz-axis" x1="{{ c.ML }}" x2="{{ c.W - c.MR }}" y1="{{ c.plot_bottom }}" y2="{{ c.plot_bottom }}"/>
-        {% for t in c.x_ticks %}<text x="{{ t.x }}" y="{{ c.plot_bottom + 18 }}" text-anchor="middle">{{ t.label }}</text>{% endfor %}
+        {% for t in c.x_ticks %}<text x="{{ t.x }}" y="{{ c.x_label_y }}" text-anchor="middle">{{ t.label }}</text>{% endfor %}
+        <rect class="viz-band" visibility="hidden" y="{{ c.MT }}" height="{{ c.hit_h }}"/>
 
         {% if c.ref_y and c.view == "climb" %}<line class="viz-ref" x1="{{ c.ML }}" x2="{{ c.W - c.MR }}" y1="{{ c.ref_y }}" y2="{{ c.ref_y }}"/>{% endif %}
         {% if c.today_x %}
-          <line class="viz-today" x1="{{ c.today_x }}" x2="{{ c.today_x }}" y1="{{ c.MT }}" y2="{{ c.plot_bottom }}"/>
+          <line class="viz-today" x1="{{ c.today_x }}" x2="{{ c.today_x }}" y1="{{ c.MT }}" y2="{{ c.hit_bottom }}"/>
           <text x="{{ c.today_x }}" y="{{ c.MT - 8 }}" text-anchor="{{ 'end' if c.today_x | float > c.W - 70 else 'middle' }}">Today</text>
         {% endif %}
 
@@ -68,9 +73,30 @@
         {% endfor %}
         {% for lb in c.labels %}<text class="viz-strong" x="{{ lb.x }}" y="{{ lb.y }}" text-anchor="{{ lb.anchor }}">{{ lb.text }}</text>{% endfor %}
 
-        <line class="viz-cross" visibility="hidden" y1="{{ c.MT }}" y2="{{ c.plot_bottom }}"/>
+        {% if c.col_pane %}{% set p = c.col_pane %}
+        <g class="viz-grid">
+          {% for t in p.y_ticks %}
+            <line x1="{{ c.ML }}" x2="{{ c.W - c.MR }}" y1="{{ t.y }}" y2="{{ t.y }}"/>
+            <text x="{{ c.ML - 8 }}" y="{{ t.y | float + 4 }}" text-anchor="end">{{ t.label }}</text>
+          {% endfor %}
+        </g>
+        <line class="viz-axis" x1="{{ c.ML }}" x2="{{ c.W - c.MR }}" y1="{{ p.bottom }}" y2="{{ p.bottom }}"/>
+        <text class="viz-cap" x="{{ c.ML }}" y="{{ p.caption_y }}">{{ p.caption }}</text>
+        {% if c.y_unit %}<text x="{{ c.ML - 8 }}" y="{{ p.caption_y }}" text-anchor="end">{{ c.y_unit }}</text>{% endif %}
+        {% for col in p.cols %}
+          {% if col.blue %}<path class="viz-col-blue" d="{{ col.blue }}"><title>{{ col.label }}</title></path>{% endif %}
+          {% if col.red %}<path class="viz-col-red" d="{{ col.red }}"><title>{{ col.label }}</title></path>{% endif %}
+        {% endfor %}
+        {% if p.target_y %}
+          <line class="viz-target" x1="{{ c.ML }}" x2="{{ c.W - c.MR }}" y1="{{ p.target_y }}" y2="{{ p.target_y }}"/>
+          <text class="viz-strong viz-halo" x="{{ c.W - c.MR - 4 }}" y="{{ p.target_y | float - 6 }}" text-anchor="end">{{ p.target_label }}</text>
+        {% endif %}
+        {% for dm in p.diamonds %}<path class="viz-big s-ref" d="M{{ dm.x | float }} {{ dm.y | float - 6 }} l5 6 l-5 6 l-5 -6 z"><title>Big payment, {{ dm.day }}</title></path>{% endfor %}
+        {% endif %}
+
+        <line class="viz-cross" visibility="hidden" y1="{{ c.MT }}" y2="{{ c.hit_bottom }}"/>
         <g class="viz-cdots"></g>
-        <rect class="viz-hit" x="{{ c.ML }}" y="{{ c.MT }}" width="{{ c.PW }}" height="{{ c.PH }}"/>
+        <rect class="viz-hit" x="{{ c.ML }}" y="{{ c.MT }}" width="{{ c.PW }}" height="{{ c.hit_h }}"/>
       </svg>
       <div class="viz-tip" hidden></div>
     </div>
@@ -81,12 +107,12 @@
     <div style="overflow-x:auto">
     <table>
       <thead><tr>
-        <th>Day</th><th class="num">That day</th><th class="num">{{ text.total_name }}</th>{% if c.has_limit %}<th class="num">{{ text.left_name }}</th>{% endif %}
+        <th>Day</th><th class="num">That day</th><th class="num">{{ text.total_name }}</th>{% if c.has_limit %}<th class="num">{{ text.left_name }}</th>{% endif %}{% if c.has_columns %}<th class="num">{{ text.day_name }}</th><th class="num">Big payments</th>{% if c.target_t is not none %}<th class="num">vs target</th>{% endif %}{% endif %}
         {% if c.has_forecast %}<th class="num">This month's pace</th><th class="num">Last 7 days' pace</th>{% if c.has_needed %}<th class="num">Needed</th>{% endif %}{% endif %}
       </tr></thead>
       <tbody>
       {% for r in c.table %}
-        <tr><td>{{ r.date }}</td><td class="num">{{ r.day or "—" }}</td><td class="num">{{ r.actual or "—" }}</td>{% if c.has_limit %}<td class="num">{{ r.left or "—" }}</td>{% endif %}
+        <tr><td>{{ r.date }}</td><td class="num">{{ r.day or "—" }}</td><td class="num">{{ r.actual or "—" }}</td>{% if c.has_limit %}<td class="num">{{ r.left or "—" }}</td>{% endif %}{% if c.has_columns %}<td class="num">{{ r.everyday or "—" }}</td><td class="num">{{ r.bigpay or "—" }}</td>{% if c.target_t is not none %}<td class="num">{{ r.vs or "—" }}</td>{% endif %}{% endif %}
           {% if c.has_forecast %}<td class="num">{{ r.month or "—" }}</td><td class="num">{{ r.recent or "—" }}</td>{% if c.has_needed %}<td class="num">{{ r.needed or "—" }}</td>{% endif %}{% endif %}</tr>
       {% endfor %}
       </tbody>

@@ -16,10 +16,11 @@
     var tip = wrap.querySelector(".viz-tip");
     var cross = svg && svg.querySelector(".viz-cross");
     var dots = svg && svg.querySelector(".viz-cdots");
+    var band = svg && svg.querySelector(".viz-band");
     if (!svg || !tip || !cross) return;
     var data;
     try { data = JSON.parse(svg.getAttribute("data-chart")); } catch (e) { return; }
-    var slot = { actual: "s1", month: "s2", recent: "s3", needed: "s-ref", big: "s1" };
+    var slot = { actual: "s1", month: "s2", recent: "s3", needed: "s-ref", big: "s-ref", col: "s1" };
     var current = null;
 
     function show(i) {
@@ -28,6 +29,10 @@
       current = i;
       cross.setAttribute("x1", day.x); cross.setAttribute("x2", day.x);
       cross.setAttribute("visibility", "visible");
+      if (band && day.cw) {
+        band.setAttribute("x", day.x - day.cw / 2); band.setAttribute("width", day.cw);
+        band.setAttribute("visibility", "visible");
+      }
       while (dots.firstChild) dots.removeChild(dots.firstChild);
       tip.textContent = "";
       tip.appendChild(el("div", "t", day.label));
@@ -59,6 +64,7 @@
     function hide() {
       current = null;
       cross.setAttribute("visibility", "hidden");
+      if (band) band.setAttribute("visibility", "hidden");
       tip.setAttribute("hidden", "");
       while (dots.firstChild) dots.removeChild(dots.firstChild);
     }

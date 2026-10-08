@@ -130,7 +130,7 @@ def month_stats(
     threshold: int = DEFAULT_ONEOFF_PAISE,
 ) -> ProgressStats:
     """The month's numbers, from the host's chart service, so the cards and the chart can't disagree."""
-    big = big_payments(conn, year, month, threshold) if mode == MODE_ONEOFFS else []
+    big = big_payments(conn, year, month, threshold)  # the day-by-day columns leave them out in every mode
     return progress_stats(
         daily_spend(conn, year, month), year=year, month=month, today=today, limit=budget, mode=mode, big=big
     )

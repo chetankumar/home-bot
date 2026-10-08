@@ -25,7 +25,7 @@ from .sync import BACKFILL_KEY, JOB_ID, backfill_start, insert_transaction, repa
 
 CHART_TEXT = ChartText(
     title="Spending through the month", noun="budget", total_name="Spent so far", left_name="Budget left",
-    big_name="Big payment", activity="spending",
+    big_name="Big payment", activity="spending", day_name="Everyday spend", target_name="Target daily burn",
 )
 INSTRUMENTS = ["upi", "credit_card", "debit_card", "netbanking", "atm"]
 
@@ -111,7 +111,7 @@ def build_router(ctx: AppContext) -> APIRouter:
             oneoff_threshold=threshold,
             chart=ctx.charts.progress(
                 series.daily, year=y, month=m, today=t, limit=budget(), mode=mode, view=view,
-                big=series.big, unit=Unit.inr(), links={"climb": link(chart="climb"), "burn": link(chart="burn")},
+                big=series.big_items, unit=Unit.inr(), links={"climb": link(chart="climb"), "burn": link(chart="burn")},
                 text=CHART_TEXT,
             ),
             links={"runrate": link(forecast="runrate"), "oneoffs": link(forecast="oneoffs")},
