@@ -28,4 +28,10 @@ def setup(ctx: AppContext) -> APIRouter:
     # Amazon orders also have their own job (the Orders page's Sync button), and an evening
     # scan so same-day orders and shipping updates are picked up before the morning sync.
     ctx.scheduler.cron(ORDERS_JOB, lambda: run_orders_sync(ctx), ctx.config.get("orders_cron", "45 19 * * *"))
+    # The regex compiler's conversations with the local model can take minutes, so they run as
+    # jobs started from the Parsers page. The interval is far off: they never fire on their own.
+    from .learn import negotiate
+
+    for kind in ("bank", "amazon"):
+        ctx.scheduler.interval(f"learn_{kind}", lambda kind=kind: negotiate(ctx, kind), weeks=5200)
     return build_router(ctx)

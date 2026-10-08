@@ -11,10 +11,7 @@
     <p>{{ m.values() | sum }} email(s) missed by regex:
       {{ m.get("ai_parsed", 0) }} read by the model · {{ m.get("ai_ignored", 0) }} judged not relevant ·
       {{ m.get("ai_failed", 0) }} model failed · {{ m.get("ai_skipped", 0) }} model not tried</p>
-    <form method="post" action="{{ app_url('/parsers/propose') }}">
-      <input type="hidden" name="kind" value="{{ kind }}">
-      <button {{ "disabled" if not ai_ready or not m }}>Ask the model for regexes</button>
-    </form>
+    {% with s = status[kind], can_start = ai_ready and m %}{% include "_learn_status.html" %}{% endwith %}
   {% endcall %}
 {% endfor %}
 </div>
@@ -37,6 +34,14 @@ items: {{ r.item_pattern }}{% endif %}</pre>
   {% endcall %}
 {% endfor %}
 {% endif %}
+{% for kind, label in kinds.items() %}{% if transcripts.get(kind) %}
+<details><summary class="muted">Last conversation with the model: {{ label }}</summary>
+  {% for m in transcripts[kind] %}
+    <p class="muted"><strong>{{ "Model" if m.role == "assistant" else "Us" }}</strong></p>
+    <pre class="trace">{{ m.content[:1500] }}{{ "…" if m.content | length > 1500 }}</pre>
+  {% endfor %}
+</details>
+{% endif %}{% endfor %}
 <h2>Scorecard</h2>
 <p class="muted">Every regex is tried best-scoring first. A regex's score goes up by one each time it reads an email.</p>
 {% for kind, label in kinds.items() %}

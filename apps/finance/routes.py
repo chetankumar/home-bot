@@ -98,6 +98,9 @@ def build_router(ctx: AppContext) -> APIRouter:
                 "untagged": stats.untagged_count(conn),
                 "unparsed": conn.execute("SELECT COUNT(*) FROM emails WHERE status = 'unparsed'").fetchone()[0],
                 "credits": stats.credits(conn, y, m),
+                "neg_failures": [dict(r) for r in conn.execute(
+                    "SELECT id, kind, status, replies, last_error FROM regex_negotiations"
+                    " WHERE dismissed = 0 AND status IN ('failed', 'unavailable') ORDER BY id DESC")],
             }
         return ctx.render(
             request,
