@@ -1,0 +1,7 @@
+Subject: Item cancelled: "Car Seat Headrest Double..."
+
+Hello Test User, the item in your order 171-7654321-0987654 was cancelled.
+
+Car Seat Headrest Double Neck Pillow
+Quantity: 1
+₹499.00

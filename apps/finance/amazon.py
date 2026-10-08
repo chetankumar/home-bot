@@ -37,7 +37,7 @@ TOTAL_LOOSE = (
 )
 BUILTIN_TOTALS = [("total_labelled", TOTAL_LABELLED), ("total_loose", TOTAL_LOOSE)]
 QTY = re.compile(r"^\s*(?:quantity|qty)\s*:?\s*(\d+)\s*$", re.I)
-SUBJECT = re.compile(r"^\s*(ordered|shipped|delivered|out for delivery|cancel\w*)\s*:?\s*(.*)$", re.I | re.S)
+SUBJECT = re.compile(r"^\s*(?:item\s+)?(ordered|shipped|delivered|out for delivery|cancel\w*)\s*:?\s*(.*)$", re.I | re.S)
 MORE_ITEMS = re.compile(r"\s+and\s+\d+\s+more\s+items?\s*$", re.I)
 
 # Lines that are never an item title when we look backwards from "Quantity:".

@@ -54,7 +54,7 @@ def test_subject_is_the_fallback_for_items():
     assert (o.parser, o.total_paise, [i.title for i in o.items]) == ("subject", None, ["Duracell AA Batteries 10 Pack"])
 
 
-@pytest.mark.parametrize("name,status", [("shipped.txt", "shipped"), ("delivered.txt", "delivered"), ("cancelled.txt", "cancelled")])
+@pytest.mark.parametrize("name,status", [("shipped.txt", "shipped"), ("delivered.txt", "delivered"), ("cancelled.txt", "cancelled"), ("item_cancelled.txt", "cancelled")])
 def test_status_updates(name, status):
     assert amazon.parse_email(*amz(name)).status == status
 
