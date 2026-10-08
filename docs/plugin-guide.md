@@ -1029,6 +1029,7 @@ shows:
 | `migrations/001_init.sql` | Several tables, foreign keys, seed rows |
 | `sync.py` | Idempotent Gmail import, per-item error isolation, a job that raises on failure |
 | `extract.py` | `ctx.ai.extract` with a Pydantic schema and validator, local-only AI policy |
+| `learn.py` | Rules in the DB with a score, a multi-turn `ctx.ai.extract` loop, jobs started on demand with `ctx.scheduler.run_now` (see `docs/finance-parsing.md`) |
 | `routes.py` | Many pages, forms, HTMX partials, the "Sync now" pattern |
 | `templates/finance_base.html` | Shared tab bar via `ui.subnav` |
 | `templates/_txn_row.html` | Inline row editing |
