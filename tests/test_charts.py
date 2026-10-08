@@ -264,7 +264,7 @@ def test_assets_are_served_and_loaded_by_every_page(hub_app):
     client = login(TestClient(hub_app()))
     assert client.get("/static/charts.css").status_code == 200 and client.get("/static/charts.js").status_code == 200
     page = client.get("/").text
-    assert 'href="/static/charts.css"' in page and 'src="/static/charts.js"' in page
+    assert 'href="/static/charts.css?v=' in page and 'src="/static/charts.js?v=' in page
 
 
 def test_the_script_writes_text_with_textcontent_only():
@@ -455,3 +455,10 @@ def test_html_has_both_panes_and_the_new_styles(charts):
 def test_over_color_is_the_validated_diverging_pole():
     css = (ROOT / "hub" / "static" / "charts.css").read_text(encoding="utf-8")
     assert "--over: #e34948" in css and "--over: #e66767" in css  # light / dark, validated against the card surface
+
+
+def test_static_urls_carry_a_version_so_browsers_refetch_changed_files():
+    from hub.main import static_version
+
+    assert static_version("charts.css").startswith("/static/charts.css?v=")
+    assert static_version("nope.css") == "/static/nope.css"
