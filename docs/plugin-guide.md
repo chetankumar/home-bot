@@ -621,24 +621,25 @@ The month defaults to the current one (hub timezone); pass `year=`, `month=` and
 | `daily` | Per-day amounts so far |
 | `limit` | The budget / allowance / goal, or `None`. Must be positive |
 | `mode` | `"runrate"` (default): the average per day so far × days in the month. `"oneoffs"`: the items in `big` count once as already paid and only the rest is projected forward |
-| `big` | `[{"day": 1, "amount": 1500000, "name": "Rent"}, ...]`, used only in `"oneoffs"` mode. Your app decides what is big (for example, a single payment of ₹5,000 or more) |
+| `big` | `[{"day": 1, "amount": 1500000, "name": "Rent"}, ...]`. Your app decides what is big (for example, a single payment of ₹5,000 or more). They count once in `"oneoffs"` mode, and in every mode they are left out of the day-by-day columns |
 
 `ProgressStats` fields: `spent`, `days_elapsed`, `days_in_period`, `days_left`, `state` (`"current"`, `"past"` or
 `"future"`), `mode`, `limit`, `remaining`, `daily`, `cumulative`, `rate` (per-day pace), `projected` (forecast at the
 end of the month), `projected_over` (negative = under the limit), `target_daily` (what you can add per day from now
 and still finish on the limit), `cut_pct` (how far the pace must fall to do that, `None` if on track),
-`recent_pace` and `recent_end` (the same, over the last 7 days), `big` and `big_total`. Method
+`recent_pace` and `recent_end` (the same, over the last 7 days), `big` and `big_total`, `big_items` (every item in `big`), `everyday` (per-day amounts without the big items) and `day_target` / `day_target_kind` (the daily target for the columns: `"needed"` = `target_daily` while the month is in progress, `"even"` = the limit split evenly over the month for a finished one, `None` without a limit). Method
 `stats.crossing("month" | "recent")` returns the date the total reaches the limit (or the date it already did),
 or `None`.
 
-**`ctx.charts.progress(daily, *, ..., unit, view, links, text) -> ProgressChart`** takes the same arguments plus:
+**`ctx.charts.progress(daily, *, ..., unit, view, links, text, columns) -> ProgressChart`** takes the same arguments plus:
 
 | Argument | Meaning |
 |---|---|
 | `unit` | How amounts are written. `Unit.inr()` (default: ₹, paise, Indian grouping, `₹1.7L`), or `Unit.plain("kWh", minor=1000, decimals=1)`, `Unit.plain("notes")`, `Unit.plain("GB", prefix=False)` |
 | `view` | `"climb"` (default: the total rises toward the limit) or `"burn"` (what is left falls to zero; needs a `limit`, otherwise it falls back to climb) |
 | `links` | `{"climb": url, "burn": url}` shows a Climb-up / Burn-down toggle. Build the URLs yourself (they are your app's routes); omit for a chart with no toggle |
-| `text` | `ChartText(title=, noun=, total_name=, left_name=, big_name=, activity=)` to name things in your domain, e.g. `ChartText(title="Power this month", noun="allowance", total_name="Used so far", left_name="Allowance left")` |
+| `columns` | `True` (default) adds a second pane under the line: a column for each day's everyday spend (big items left out, shown as diamonds) against a horizontal line at the daily target, with the over-target part of a column in red. It shares the day axis and the hover readout. `False` draws the line chart only |
+| `text` | `ChartText(title=, noun=, total_name=, left_name=, big_name=, activity=, day_name=, target_name=)` to name things in your domain, e.g. `ChartText(title="Power this month", noun="allowance", total_name="Used so far", left_name="Allowance left", day_name="Power per day", target_name="Daily allowance")` |
 
 It returns a `ProgressChart` with `.html` (put it in a template as `{{ chart.html }}`: it is already safe to render
 and escapes any text you passed), `.stats` (the `ProgressStats`), `.view` (as drawn) and `.empty`.

@@ -54,6 +54,10 @@ class ProgressStats:
     cumulative: list[int]  # total through day i; index 0 = 0; length days_elapsed + 1
     big: list[dict]  # big items counted once ("oneoffs" mode): day, amount, name
     big_total: int
+    everyday: list[int]  # per day with every big item taken out (never below zero); zero after today
+    big_items: list[dict]  # every big item passed in, in any mode (the columns leave them out)
+    day_target: int | None  # the per-day line the columns are judged against (see day_target_kind)
+    day_target_kind: str | None  # "needed" (what you can add per day to finish on the limit) or "even" (limit / days)
     rate: int  # per-day pace (everyday spend only, in "oneoffs" mode)
     projected: int  # forecast for the end of the month at that pace
     remaining: int | None  # limit - spent
@@ -120,16 +124,20 @@ def progress_stats(
     for i in range(d):
         cumulative.append(cumulative[-1] + series[i])
 
-    used = []
-    if mode == MODE_ONEOFFS:
-        for b in big:
-            day = int(b["day"])
-            if 1 <= day <= n:
-                used.append({**b, "day": min(day, d) if d else day})
+    big_items = []  # every big item, whatever the mode: the day-by-day columns always leave them out
+    for b in big:
+        day = int(b["day"])
+        if 1 <= day <= n:
+            big_items.append({**b, "day": min(day, d) if d else day})
+    used = big_items if mode == MODE_ONEOFFS else []  # the forecast only counts them once in "oneoffs" mode
     big_total = sum(int(b["amount"]) for b in used)
     big_by_day: dict[int, int] = {}
     for b in used:
         big_by_day[b["day"]] = big_by_day.get(b["day"], 0) + int(b["amount"])
+    all_big_by_day: dict[int, int] = {}
+    for b in big_items:
+        all_big_by_day[b["day"]] = all_big_by_day.get(b["day"], 0) + int(b["amount"])
+    everyday = [max(0, series[i] - all_big_by_day.get(i + 1, 0)) if i < d else 0 for i in range(n)]
 
     rate = round((spent - big_total) / d) if d else 0
     projected = spent if d == n else big_total + rate * n
@@ -144,9 +152,16 @@ def progress_stats(
     if d:
         lo = max(1, d - RECENT_DAYS + 1)
         recent_pace = round(sum(series[i - 1] - big_by_day.get(i, 0) for i in range(lo, d + 1)) / (d - lo + 1))
+    day_target, day_target_kind = None, None
+    if limit is not None and d > 0:
+        if target is not None:
+            day_target, day_target_kind = target, "needed"
+        else:  # a finished month (or its last day) has no "from now" target: judge it against an even split
+            day_target, day_target_kind = limit // n, "even"
     return ProgressStats(
         year=year, month=month, days_in_period=n, days_elapsed=d, state=state, mode=mode, limit=limit,
         spent=spent, daily=series, cumulative=cumulative, big=used, big_total=big_total, rate=rate,
+        everyday=everyday, big_items=big_items, day_target=day_target, day_target_kind=day_target_kind,
         projected=projected, remaining=remaining,
         projected_over=(projected - limit) if limit is not None else None,
         days_left=days_left, target_daily=target, cut_pct=cut,
@@ -224,6 +239,7 @@ class AppCharts:
         view: str = "climb",
         links: Mapping[str, str] | None = None,
         text: ChartText | None = None,
+        columns: bool = True,
     ) -> ProgressChart:
         """The month as a chart that grows as you go: a climb-up (the total rises) or burn-down (what is
         left falls) with forecast lines and the limit. Arguments as `stats()`, plus:
@@ -232,10 +248,13 @@ class AppCharts:
         view    "climb" (default) or "burn" (needs a limit; falls back to climb without one)
         links   {"climb": url, "burn": url} to show the view toggle; omit for a chart with no toggle
         text    ChartText(...) to name things in your domain (title, "budget", "Spent so far", ...)
+        columns a second pane under the line, on the same day axis: one column per day of everyday amounts
+                (items in `big` left out) against the per-day target line. Over-target days carry a red cap.
+                `columns=False` gives the single-pane chart
         """
         stats = self.stats(daily, year=year, month=month, today=today, limit=limit, mode=mode, big=big)
         unit, text = unit or Unit.inr(), text or ChartText()
-        geometry = build_progress(stats, view if view in VIEWS else "climb", unit, text)
+        geometry = build_progress(stats, view if view in VIEWS else "climb", unit, text, columns)
         geometry["title"] = text.title
         html = self._charts.render_progress(geometry, text, links or {})
         return ProgressChart(html=html, stats=stats, view=geometry["view"], empty=bool(geometry.get("empty")))

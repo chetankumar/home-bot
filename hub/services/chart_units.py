@@ -99,3 +99,5 @@ class ChartText:
     left_name: str = "Left"  # the falling line in the burn-down view
     big_name: str = "Big item"  # a single large item counted once in "oneoffs" mode
     activity: str = "activity"  # "No {activity} recorded yet this month."
+    day_name: str = "Per day"  # the day-by-day columns: "Everyday spend"
+    target_name: str = "Target per day"  # the horizontal line across the columns

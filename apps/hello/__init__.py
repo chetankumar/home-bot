@@ -51,7 +51,8 @@ def setup(ctx: AppContext) -> APIRouter:
         return ctx.charts.progress(
             notes_per_day(), limit=MONTHLY_GOAL, unit=Unit.plain("notes"),
             text=ChartText(title="Notes this month", noun="goal", total_name="Notes so far",
-                           left_name="Left to goal", activity="notes"),
+                           left_name="Left to goal", activity="notes", day_name="Notes per day",
+                           target_name="Daily pace for the goal"),
         )
 
     @router.get("/", response_class=HTMLResponse)

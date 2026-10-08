@@ -300,6 +300,12 @@ finish within it, with a sentence above ("At this month's pace you'll reach
 your ₹40,000 budget on 9 Oct…"). Hover (or use the arrow keys) to read any day;
 the **Table view** under it has every number.
 
+Below the line, in the same card and on the same day axis, a **column for each
+day's everyday spend** (big payments such as rent are left out and shown as
+diamonds) sits against a line at your **Target daily burn**. A day under the
+target stops short of the line; a day over it grows a red cap, so you can see at
+a glance how far up or down you are day to day.
+
 The **Forecast** control above the cards chooses how the month is projected,
 for the chart and the cards together, and is remembered:
 - **Run-rate**: the average daily spend so far × days in the month (the default).

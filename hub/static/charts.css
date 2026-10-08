@@ -4,14 +4,15 @@
   --s1: #2a78d6; /* Actual */
   --s2: #eb6834; /* At this month's pace */
   --s3: #1baf7a; /* At last 7 days' pace */
+  --over: #e34948; /* a day over the target: the diverging pole opposite blue (validated against the card surface) */
   --viz-surface: var(--surface);
   --viz-ref: var(--muted);
   --viz-grid: var(--border);
 }
 @media (prefers-color-scheme: dark) {
-  :root:where(:not([data-theme="light"])) .viz-root { --s1: #3987e5; --s2: #d95926; --s3: #199e70; }
+  :root:where(:not([data-theme="light"])) .viz-root { --s1: #3987e5; --s2: #d95926; --s3: #199e70; --over: #e66767; }
 }
-:root[data-theme="dark"] .viz-root { --s1: #3987e5; --s2: #d95926; --s3: #199e70; }
+:root[data-theme="dark"] .viz-root { --s1: #3987e5; --s2: #d95926; --s3: #199e70; --over: #e66767; }
 
 /* chart */
 .viz-note { margin-bottom: .6rem; }
@@ -44,6 +45,16 @@
 .viz-big { stroke: var(--viz-surface); stroke-width: 2; }
 .viz-cross { stroke: var(--viz-ref); stroke-width: 1; }
 .viz-hit { fill: transparent; cursor: crosshair; }
+.viz-col-blue { fill: var(--s1); }
+.viz-col-red { fill: var(--over); }
+.viz-target { stroke: var(--viz-ref); stroke-width: 2; }
+.viz-band { fill: var(--viz-ref); fill-opacity: .1; }
+.viz-big.s-ref { fill: var(--viz-ref); }
+.viz-wrap text.viz-cap { fill: var(--muted); font-weight: 600; }
+.viz-wrap text.viz-halo { paint-order: stroke; stroke: var(--viz-surface); stroke-width: 3px; stroke-linejoin: round; }
+.viz-sw { width: 12px; height: 12px; border-radius: 2px; display: inline-block; }
+.viz-sw.s1 { background: var(--s1); }
+.viz-sw.over { background: var(--over); }
 .viz-tip {
   position: absolute; top: 0; z-index: 5; pointer-events: none; min-width: 190px; max-width: 280px;
   background: var(--surface); color: var(--text); border: 1px solid var(--border); border-radius: 8px;
