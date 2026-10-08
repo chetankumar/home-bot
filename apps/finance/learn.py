@@ -5,6 +5,10 @@ Flow: sync records every email the built-in regexes could not read (`parse_misse
 regex against those same emails, and stores the survivors as `proposed`. Nothing is used
 until the user approves it on the Parsers page; approved regexes run after the built-in
 ones, so they can only fill gaps.
+
+Every regex, built-in or learned, is a row in `learned_parsers` with a scorecard: `matches`
+goes up each time the regex reads an email (`hit`), and rules are always loaded
+most-matches-first. There is no fixed order, so the patterns must not overlap.
 """
 
 from __future__ import annotations
@@ -21,7 +25,8 @@ from hub.plugin import AppContext
 from hub.services.ai import AIError
 
 from . import amazon
-from .parsers import Builder, Parsed, _base, clean_name, collapse, mask, to_paise
+from .amazon import AmazonRule, amazon_items
+from .parsers import BUILTIN_SPECS, Rule, collapse, make_builder, mask, to_paise
 
 SAMPLES = 10
 MAX_PATTERN = 600
@@ -63,49 +68,82 @@ class BankRule:
     rx: re.Pattern[str]
     direction: str
     instrument: str
+    builder: str = "generic"
+    builtin: bool = False
 
-    def as_parser(self) -> tuple[str, re.Pattern[str], Builder]:
-        direction, instrument = self.direction, self.instrument
-
-        def build(m: re.Match[str], text: str) -> Parsed:
-            g = m.groupdict()
-            cp = " ".join(x for x in (g.get("vpa"), clean_name(g.get("merchant"))) if x) or None
-            return _base(m, direction, instrument, cp, text)
-
-        return f"learned:{self.name}", self.rx, build
+    def as_parser(self) -> Rule:
+        # Learned rules carry a prefix so the Review page shows where a reading came from.
+        name = self.name if self.builtin else f"learned:{self.name}"
+        return name, self.rx, make_builder(self.builder, self.direction, self.instrument)
 
 
-@dataclass
-class AmazonRule:
-    id: int
-    name: str
-    total: re.Pattern[str] | None
-    items: re.Pattern[str] | None
+def ensure_seeded(conn: sqlite3.Connection, kind: str) -> None:
+    """Make sure the built-in regexes are rows in the table. Cheap when they already are."""
+    seeds = (
+        [(n, p, None, d, i, b) for n, p, b, d, i in BUILTIN_SPECS]
+        if kind == "bank"
+        else [(n, p, None, None, None, "generic") for n, p in amazon.BUILTIN_TOTALS]
+    )
+    have = conn.execute("SELECT COUNT(*) FROM learned_parsers WHERE kind = ? AND builtin = 1", (kind,)).fetchone()[0]
+    if have == len(seeds):
+        return
+    conn.executemany(
+        "INSERT OR IGNORE INTO learned_parsers(kind, name, pattern, item_pattern, direction, instrument,"
+        " builder, builtin, status) VALUES (?, ?, ?, ?, ?, ?, ?, 1, 'active')",
+        [(kind, n, p, ip, d, i or None, b) for n, p, ip, d, i, b in seeds],
+    )
 
 
-def _row_rules(conn: sqlite3.Connection, kind: str, status: str = "active") -> list[sqlite3.Row]:
+def _row_rules(conn: sqlite3.Connection, kind: str, status: str) -> list[sqlite3.Row]:
+    ensure_seeded(conn, kind)
+    # The scorecard decides the order: most matches first (id keeps ties in the original order).
     return conn.execute(
-        "SELECT * FROM learned_parsers WHERE kind = ? AND status = ? ORDER BY id", (kind, status)
+        "SELECT * FROM learned_parsers WHERE kind = ? AND status = ? ORDER BY matches DESC, id", (kind, status)
     ).fetchall()
+
+
+def _compile(row: sqlite3.Row, column: str, needs: set[str], multiline: bool = False) -> re.Pattern[str] | None:
+    if row["builtin"]:  # our own pattern: trusted
+        return re.compile(row[column], re.I | (re.M if multiline else 0)) if row[column] else None
+    return compile_pattern(row[column], needs, multiline)
 
 
 def bank_rules(conn: sqlite3.Connection, status: str = "active") -> list[BankRule]:
     out = []
     for r in _row_rules(conn, "bank", status):
-        rx = compile_pattern(r["pattern"], {"amount"})
-        if rx and r["direction"] and r["instrument"]:
-            out.append(BankRule(r["id"], r["name"], rx, r["direction"], r["instrument"]))
+        rx = _compile(r, "pattern", {"amount"})
+        if rx and r["direction"]:
+            out.append(BankRule(
+                r["id"], r["name"], rx, r["direction"], r["instrument"] or "", r["builder"], bool(r["builtin"])))
     return out
 
 
 def amazon_rules(conn: sqlite3.Connection, status: str = "active") -> list[AmazonRule]:
     out = []
     for r in _row_rules(conn, "amazon", status):
-        total = compile_pattern(r["pattern"], {"total"})
-        items = compile_pattern(r["item_pattern"], {"title"}, multiline=True)
+        total = _compile(r, "pattern", {"total"})
+        items = _compile(r, "item_pattern", {"title"}, multiline=True)
         if total or items:
-            out.append(AmazonRule(r["id"], r["name"], total, items))
+            out.append(AmazonRule(r["id"], r["name"], total, items, bool(r["builtin"])))
     return out
+
+
+def hit(conn: sqlite3.Connection, kind: str, name: str) -> None:
+    """Score a match: the regex just read an email."""
+    conn.execute(
+        "UPDATE learned_parsers SET matches = matches + 1, last_matched_at = datetime('now')"
+        " WHERE kind = ? AND name = ?",
+        (kind, name.removeprefix("learned:")),
+    )
+
+
+def unique_name(conn: sqlite3.Connection, kind: str, name: str) -> str:
+    taken = {r[0] for r in conn.execute("SELECT name FROM learned_parsers WHERE kind = ?", (kind,))}
+    candidate, n = name, 1
+    while candidate in taken:
+        n += 1
+        candidate = f"{name}_{n}"
+    return candidate
 
 
 # -- asking the model -----------------------------------------------------------------------
@@ -207,24 +245,6 @@ def _amazon_check(rule: AmazonRule, samples: list[sqlite3.Row]) -> tuple[int, st
     return hits, preview
 
 
-def amazon_items(rule: AmazonRule, body: str) -> list[amazon.OrderItem]:
-    out: list[amazon.OrderItem] = []
-    if not rule.items:
-        return out
-    for m in rule.items.finditer(body):
-        g = m.groupdict()
-        title = clean_name(g.get("title"))
-        if not title or len(title) < 3:
-            continue
-        try:
-            price = to_paise(g["price"]) if g.get("price") else None
-            qty = int(g["qty"]) if g.get("qty") else 1
-        except ValueError:
-            price, qty = None, 1
-        out.append(amazon.OrderItem(title[:300], max(qty, 1), price))
-    return out[:30]
-
-
 def propose(ctx: AppContext, kind: str) -> str:
     """Ask the model for regexes from up to 10 missed emails. Returns a one-line result."""
     if kind not in ("bank", "amazon"):
@@ -274,7 +294,8 @@ def propose(ctx: AppContext, kind: str) -> str:
             conn.execute(
                 "INSERT INTO learned_parsers(kind, name, pattern, item_pattern, direction, instrument,"
                 " samples, matched, preview) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                (kind, name, pattern, item_pattern, direction, instrument, len(samples), hits, preview),
+                (kind, unique_name(conn, kind, name), pattern, item_pattern, direction, instrument,
+                 len(samples), hits, preview),
             )
             saved += 1
     ctx.log.info("regex compiler (%s): %d proposed, %d rejected from %d emails", kind, saved, rejected, len(samples))
@@ -291,7 +312,7 @@ def clear_covered(conn: sqlite3.Connection, kind: str) -> int:
     from .parsers import parse_email
 
     table = "emails" if kind == "bank" else "order_emails"
-    extra = [r.as_parser() for r in bank_rules(conn)] if kind == "bank" else []
+    bank = [r.as_parser() for r in bank_rules(conn)] if kind == "bank" else []
     rules = amazon_rules(conn) if kind == "amazon" else []
     cleared = 0
     for r in conn.execute(
@@ -299,7 +320,7 @@ def clear_covered(conn: sqlite3.Connection, kind: str) -> int:
         " WHERE m.kind = ?", (kind,)
     ).fetchall():
         if kind == "bank":
-            covered = parse_email(r["subject"], r["body"], extra) is not None
+            covered = parse_email(r["subject"], r["body"], bank) is not None
         else:
             o = amazon.parse_email(r["subject"], r["body"], rules)
             covered = isinstance(o, amazon.ParsedOrder) and o.parser == "body" and o.total_paise is not None

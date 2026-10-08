@@ -51,7 +51,7 @@ def test_proposal_waits_for_approval_then_reads_new_emails(fin):  # noqa: F811
     sent = fin.ollama.calls[-1][2][-1].content
     assert "ZOMATO" in sent and "SWIGGY" in sent
     with fin.ctx.db() as conn:
-        rule = conn.execute("SELECT * FROM learned_parsers").fetchone()
+        rule = conn.execute("SELECT * FROM learned_parsers WHERE builtin = 0").fetchone()
     assert (rule["status"], rule["matched"], rule["samples"]) == ("proposed", 2, 2)
 
     # Not used while merely proposed.
@@ -74,7 +74,7 @@ def test_bad_proposals_are_rejected(fin):  # noqa: F811
     nested = PROPOSAL["parsers"][0] | {"pattern": r"(?P<amount>(\d+)+)"}
     fin.ollama.outputs = [{"parsers": [wrong_amount, nested]}]
     assert "didn't hold up" in learn.propose(fin.ctx, "bank")
-    assert count(fin.ctx, "SELECT COUNT(*) FROM learned_parsers") == 0
+    assert count(fin.ctx, "SELECT COUNT(*) FROM learned_parsers WHERE builtin = 0") == 0
 
 
 def test_amazon_total_regex(fin):  # noqa: F811
@@ -88,7 +88,7 @@ def test_amazon_total_regex(fin):  # noqa: F811
     assert "ready to review" in learn.propose(fin.ctx, "amazon")
     client = login(TestClient(fin.app))
     with fin.ctx.db() as conn:
-        rid = conn.execute("SELECT id FROM learned_parsers").fetchone()[0]
+        rid = conn.execute("SELECT id FROM learned_parsers WHERE builtin = 0").fetchone()[0]
     fin.gmail.add("o2", body.replace("402-1234567-8901234", "402-7654321-1098765"), at(4),
                   subject='Ordered: "Steel bottle"', sender="auto-confirm@amazon.in")
     client.post(f"{BASE}/parsers/{rid}/approve")
@@ -103,3 +103,92 @@ def test_parsers_page_renders(fin):  # noqa: F811
     seed_misses(fin)
     html = login(TestClient(fin.app)).get(f"{BASE}/parsers").text
     assert "HDFC alerts" in html and "2 email(s) missed" in html
+
+
+# -- scorecard ------------------------------------------------------------------------------
+import random  # noqa: E402
+
+import pytest  # noqa: E402
+
+from apps.finance import amazon, parsers  # noqa: E402
+from tests.conftest import fixture_email  # noqa: E402
+from tests.test_finance_parsers import CASES  # noqa: E402
+
+
+def scores(fin, kind="bank"):  # noqa: F811
+    with fin.ctx.db() as conn:
+        return {r[0]: r[1] for r in conn.execute("SELECT name, matches FROM learned_parsers WHERE kind = ?", (kind,))}
+
+
+def test_builtins_are_seeded_once(fin):  # noqa: F811
+    with fin.ctx.db() as conn:
+        for _ in range(2):
+            assert len(learn.bank_rules(conn)) == len(parsers.BUILTIN_SPECS)
+            assert len(learn.amazon_rules(conn)) == len(amazon.BUILTIN_TOTALS)
+    assert count(fin.ctx, "SELECT COUNT(*) FROM learned_parsers WHERE builtin = 1") == 12
+
+
+def test_a_match_scores_the_regex_that_read_the_email(fin):  # noqa: F811
+    fin.gmail.add("u", "Rs.450.00 has been debited from account 4321 to VPA a@b X on 02-10-26.", at(2))
+    fin.gmail.add("v", "Rs.90.00 has been debited from account 4321 to VPA c@d Y on 02-10-26.", at(2, 13))
+    fin.sync.run_sync(fin.ctx, now=at(3))
+    s = scores(fin)
+    assert s["upi_debit"] == 2 and sum(s.values()) == 2
+    assert count(fin.ctx, "SELECT last_matched_at IS NOT NULL FROM learned_parsers WHERE name = 'upi_debit'")
+
+
+def test_model_reads_and_misses_do_not_score(fin):  # noqa: F811
+    seed_misses(fin)  # two emails only the model could read
+    assert sum(scores(fin).values()) == 0
+
+
+def test_rules_load_best_score_first(fin):  # noqa: F811
+    with fin.ctx.db() as conn:
+        assert [r.name for r in learn.bank_rules(conn)][:2] == ["upi_debit", "upi_credit"]  # ties keep seed order
+        conn.execute("UPDATE learned_parsers SET matches = 5 WHERE name = 'atm_withdrawal_v2'")
+        conn.execute("UPDATE learned_parsers SET matches = 9 WHERE name = 'netbanking_v2'")
+        assert [r.name for r in learn.bank_rules(conn)][:3] == ["netbanking_v2", "atm_withdrawal_v2", "upi_debit"]
+        conn.execute("UPDATE learned_parsers SET status = 'disabled' WHERE name = 'netbanking_v2'")
+        assert "netbanking_v2" not in [r.name for r in learn.bank_rules(conn)]
+
+
+def test_learned_names_stay_unique(fin):  # noqa: F811
+    seed_misses(fin)
+    fin.ollama.outputs = [{"parsers": [PROPOSAL["parsers"][0] | {"name": "upi_debit"}]}]
+    learn.propose(fin.ctx, "bank")
+    assert "upi_debit_2" in scores(fin)
+
+
+@pytest.mark.parametrize("seed", range(6))
+def test_bank_fixtures_read_the_same_in_any_score_order(seed):
+    """Rules are tried best-score first, so no alert may depend on which one comes first."""
+    rules = list(parsers.BUILTIN_RULES)
+    random.Random(seed).shuffle(rules) if seed else rules.reverse()
+    for case in CASES:
+        want = parsers.parse_email(*fixture_email(case[0]))
+        got = parsers.parse_email(*fixture_email(case[0]), rules)
+        assert got == want, (case[0], seed)
+
+
+@pytest.mark.parametrize("seed", range(4))
+def test_amazon_totals_read_the_same_in_any_score_order(seed):
+    rules = list(amazon.DEFAULT_RULES)
+    rules.reverse() if seed % 2 == 0 else None
+    for text, want in [
+        ("Total: ₹1,299.00", 129900), ("Amount payable ₹450", 45000), ("Order Total: ₹99.00\nTotal: ₹5", 9900),
+        ("Total: ₹5\nOrder Total: ₹99.00", 9900), ("Subtotal: ₹500.00", None), ("Item total ₹500", 50000),
+        ("Total before tax: ₹500.00", None),
+    ]:
+        assert amazon.parse_total(text, rules) == want, text
+
+
+def test_scorecard_page_lists_builtins_and_can_disable(fin):  # noqa: F811
+    client = login(TestClient(fin.app))
+    html = client.get(f"{BASE}/parsers").text
+    assert "Scorecard" in html and "upi_debit" in html and "total_labelled" in html and "built-in" in html
+    with fin.ctx.db() as conn:
+        rid = conn.execute("SELECT id FROM learned_parsers WHERE name = 'upi_debit'").fetchone()[0]
+    client.post(f"{BASE}/parsers/{rid}/disable")
+    assert scores(fin) and count(fin.ctx, "SELECT status FROM learned_parsers WHERE id = ?", rid) == "disabled"
+    client.post(f"{BASE}/parsers/{rid}/enable")
+    assert count(fin.ctx, "SELECT status FROM learned_parsers WHERE id = ?", rid) == "active"

@@ -18,31 +18,52 @@
   {% endcall %}
 {% endfor %}
 </div>
-<h2>Regexes</h2>
-{% for r in rules %}
+{% if proposed %}
+<h2>Waiting for your approval</h2>
+{% for r in proposed %}
   {% call ui.card(r.name ~ " — " ~ kinds[r.kind]) %}
-    <p>{{ ui.badge(r.status, "good" if r.status == "active" else "warn" if r.status == "proposed" else "info") }}
-      matched {{ r.matched }} of {{ r.samples }} sample emails
+    <p>{{ ui.badge("proposed", "warn") }} matched {{ r.matched }} of {{ r.samples }} sample emails
       {% if r.direction %} · {{ r.direction }} · {{ r.instrument | replace("_", " ") }}{% endif %}</p>
     <pre class="trace">{{ r.pattern }}{% if r.item_pattern %}
 
 items: {{ r.item_pattern }}{% endif %}</pre>
     {% if r.preview %}<p class="muted">First match read as: <code>{{ r.preview | tojson }}</code></p>{% endif %}
-    {% if r.status == "proposed" %}
     <form method="post" action="{{ app_url('/parsers/' ~ r.id ~ '/approve') }}" class="row">
       <button>Approve &amp; re-read missed emails</button>
     </form>
     <form method="post" action="{{ app_url('/parsers/' ~ r.id ~ '/reject') }}" style="margin-top: .5rem">
       <button class="secondary small">Reject</button>
     </form>
-    {% elif r.status == "active" %}
-    <form method="post" action="{{ app_url('/parsers/' ~ r.id ~ '/disable') }}">
-      <button class="secondary small">Disable</button>
-    </form>
-    {% endif %}
   {% endcall %}
-{% else %}
-  <p class="muted">No proposals yet.</p>
+{% endfor %}
+{% endif %}
+<h2>Scorecard</h2>
+<p class="muted">Every regex is tried best-scoring first. A regex's score goes up by one each time it reads an email.</p>
+{% for kind, label in kinds.items() %}
+  {% call ui.card(label) %}
+    <table>
+      <thead><tr><th>Regex</th><th>Matches</th><th>Last matched</th><th></th></tr></thead>
+      <tbody>
+      {% for r in scorecard[kind] %}
+        <tr>
+          <td>{{ r.name }} {% if r.builtin %}{{ ui.badge("built-in", "info") }}{% endif %}
+            {% if r.status == "disabled" %}{{ ui.badge("disabled", "warn") }}{% endif %}
+            <details><summary class="muted">pattern</summary>
+              <pre class="trace">{{ r.pattern }}{% if r.item_pattern %}
+
+items: {{ r.item_pattern }}{% endif %}</pre></details></td>
+          <td>{{ r.matches }}</td>
+          <td class="muted">{{ (r.last_matched_at or "never") | replace("T", " ") }}</td>
+          <td>
+            <form method="post" action="{{ app_url('/parsers/' ~ r.id ~ ('/enable' if r.status == 'disabled' else '/disable')) }}">
+              <button class="secondary small">{{ "Enable" if r.status == "disabled" else "Disable" }}</button>
+            </form>
+          </td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  {% endcall %}
 {% endfor %}
 <h2>Recent misses</h2>
 {% for e in recent %}

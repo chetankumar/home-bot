@@ -142,93 +142,114 @@ def _account(direction: str, instrument: str) -> Builder:
     return build
 
 
-PARSERS: list[tuple[str, re.Pattern[str], Builder]] = [
+def _generic(direction: str, instrument: str) -> Builder:
+    """For learned regexes: named groups amount, date, acct, merchant, vpa; the rest is fixed."""
+
+    def build(m, text):
+        g = m.groupdict()
+        cp = " ".join(x for x in (g.get("vpa"), clean_name(g.get("merchant"))) if x) or None
+        return _base(m, direction, instrument, cp, text)
+
+    return build
+
+
+def make_builder(builder: str, direction: str, instrument: str) -> Builder:
+    """How a regex match becomes a Parsed. `builder` is stored with each rule in the database."""
+    if builder == "upi":
+        return _upi(direction)
+    if builder == "card":
+        return _card(direction)
+    if builder == "account":
+        return _account(direction, instrument)
+    return _generic(direction, instrument)
+
+
+# The built-in regexes: (name, pattern, builder, direction, instrument). They are seeded into
+# the database (see learn.py), which is where they are read from; this list is the source of
+# the seed and the fallback when parse_email is called without database rules. The patterns
+# are written so no two can match the same alert: rules are tried in score order, not in
+# this order (tests/test_finance_learn.py checks every order gives the same result).
+BUILTIN_SPECS: list[tuple[str, str, str, str, str]] = [
     (
         "upi_debit",
-        re.compile(
-            AMT + r" (?:has been |is )?debited from " + ACCOUNT + r" to vpa " + VPA
-            + r"(?: (?P<name>.*?))? on " + DATE, re.I),
-        _upi("debit"),
+        AMT + r" (?:has been |is )?debited from " + ACCOUNT + r" to vpa " + VPA
+        + r"(?: (?P<name>.*?))? on " + DATE,
+        "upi", "debit", "upi",
     ),
     (
         "upi_credit",
-        re.compile(
-            AMT + r" (?:has been |is )?(?:successfully )?credited to " + ACCOUNT + r" by vpa "
-            + VPA + r"(?: (?P<name>.*?))? on " + DATE, re.I),
-        _upi("credit"),
+        AMT + r" (?:has been |is )?(?:successfully )?credited to " + ACCOUNT + r" by vpa "
+        + VPA + r"(?: (?P<name>.*?))? on " + DATE,
+        "upi", "credit", "upi",
     ),
     (
         # Older: "Thank you for using your HDFC Bank Credit Card ending 1234 for Rs 500.00 at X on 03-10-2026 14:22:10"
         "card_spend_v1",
-        re.compile(
-            r"using (?:your )?hdfc bank (?P<card>credit|debit) card ending " + ACCT + r" for "
-            + AMT + r" at (?P<merchant>.+?) on " + DATE, re.I),
-        _card("debit"),
+        r"using (?:your )?hdfc bank (?P<card>credit|debit) card ending " + ACCT + r" for "
+        + AMT + r" at (?P<merchant>.+?) on " + DATE,
+        "card", "debit", "",
     ),
     (
         # Newer: "Rs.500.00 is debited from your HDFC Bank Credit Card ending 1234 towards X on 03 Oct, 2026"
         "card_spend_v2",
-        re.compile(
-            AMT + r" (?:has been |is )?(?:debited|spent) (?:from|on) (?:your )?hdfc bank "
-            r"(?P<card>credit|debit) card ending " + ACCT + r" (?:towards|at) (?P<merchant>.+?) on "
-            + DATE, re.I),
-        _card("debit"),
+        AMT + r" (?:has been |is )?(?:debited|spent) (?:from|on) (?:your )?hdfc bank "
+        r"(?P<card>credit|debit) card ending " + ACCT + r" (?:towards|at) (?P<merchant>.+?) on "
+        + DATE,
+        "card", "debit", "",
     ),
     (
         "atm_withdrawal_v1",
-        re.compile(
-            r"(?P<card>debit) card ending " + ACCT + r" for atm withdrawal for " + AMT
-            + r"(?: in (?P<merchant>.+?))?(?: at .+?)? on " + DATE, re.I),
-        _account("debit", "atm"),
+        r"(?P<card>debit) card ending " + ACCT + r" for atm withdrawal for " + AMT
+        + r"(?: in (?P<merchant>.+?))?(?: at .+?)? on " + DATE,
+        "account", "debit", "atm",
     ),
     (
         "atm_withdrawal_v2",
-        re.compile(
-            AMT + r" (?:has been |is )?withdrawn from " + ACCOUNT
-            + r".*?(?: at (?P<merchant>atm.+?))? on " + DATE, re.I),
-        _account("debit", "atm"),
+        AMT + r" (?:has been |is )?withdrawn from " + ACCOUNT
+        + r".*?(?: at (?P<merchant>atm.+?))? on " + DATE,
+        "account", "debit", "atm",
     ),
     (
         "card_credit",
-        re.compile(
-            AMT + r"(?: from (?P<merchant>.+?))? (?:has been |is )?credited to (?:your )?hdfc bank "
-            r"(?P<card>credit|debit) card ending " + ACCT + r"(?: on " + DATE + ")?", re.I),
-        _card("credit"),
+        AMT + r"(?: from (?P<merchant>.+?))? (?:has been |is )?credited to (?:your )?hdfc bank "
+        r"(?P<card>credit|debit) card ending " + ACCT + r"(?: on " + DATE + ")?",
+        "card", "credit", "",
     ),
     (
         "netbanking_v1",
-        re.compile(
-            AMT + r" (?:has been |is )?debited from " + ACCOUNT
-            + r" (?:towards|to|for) (?P<merchant>.+?) on " + DATE, re.I),
-        _account("debit", "netbanking"),
+        AMT + r" (?:has been |is )?debited from " + ACCOUNT
+        + r" (?:towards|to|for) (?!vpa\b)(?P<merchant>.+?) on " + DATE,
+        "account", "debit", "netbanking",
     ),
     (
         "netbanking_v2",
-        re.compile(
-            r"netbanking transaction of " + AMT + r" from " + ACCOUNT
-            + r" to (?P<merchant>.+?) on " + DATE, re.I),
-        _account("debit", "netbanking"),
+        r"netbanking transaction of " + AMT + r" from " + ACCOUNT
+        + r" to (?P<merchant>.+?) on " + DATE,
+        "account", "debit", "netbanking",
     ),
     (
         "account_credit",
-        re.compile(
-            AMT + r" (?:has been |is )?(?:successfully )?(?:credited|deposited) (?:to|in) "
-            + ACCOUNT + r"(?: on " + DATE + r")?(?: (?:by|from) (?P<merchant>.+?)" + TO_DOT + ")?",
-            re.I),
-        _account("credit", "netbanking"),
+        AMT + r" (?:has been |is )?(?:successfully )?(?:credited|deposited) (?:to|in) "
+        + ACCOUNT + r"(?! by vpa\b)(?: on " + DATE + r")?(?: (?:by|from) (?P<merchant>.+?)" + TO_DOT + ")?",
+        "account", "credit", "netbanking",
     ),
 ]
 
+Rule = tuple[str, "re.Pattern[str]", Builder]  # (parser name, pattern, builder)
+BUILTIN_RULES: list[Rule] = [
+    (name, re.compile(pattern, re.I), make_builder(builder, direction, instrument))
+    for name, pattern, builder, direction, instrument in BUILTIN_SPECS
+]
 
-def parse_email(
-    subject: str, body: str, extra: Sequence[tuple[str, re.Pattern[str], Builder]] = ()
-) -> Parsed | str | None:
+
+def parse_email(subject: str, body: str, rules: Sequence[Rule] | None = None) -> Parsed | str | None:
     """Return Parsed for a transaction, IGNORE for non-transaction mail, None if unsure.
 
-    `extra` are approved learned parsers (see learn.py); they are tried after the built-in ones.
+    `rules` come from the database, best-scoring first (learn.bank_rules); without them the
+    built-in set is used. Any rule that matches wins.
     """
     text = collapse(body)
-    for name, rx, build in [*PARSERS, *extra]:
+    for name, rx, build in BUILTIN_RULES if rules is None else rules:
         m = rx.search(text)
         if m:
             try:
