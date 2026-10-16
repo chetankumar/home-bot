@@ -13,9 +13,7 @@
     <label>Alert sender addresses (one per line)
       <textarea name="sender_list">{{ senders | join("\n") }}</textarea>
     </label>
-    <label>Amazon order-email senders (one per line)
-      <textarea name="amazon_sender_list">{{ amazon_senders | join("\n") }}</textarea>
-    </label>
+    <p class="muted">Amazon orders are read with the Gmail search <code>{{ amazon_filter }}</code>. Shipped, delivered, and marketing mail is skipped.</p>
     <button>Save</button>
   </form>
   {% endcall %}

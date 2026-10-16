@@ -227,10 +227,10 @@ redirect URI.
    and mark which ones count as spending. Each category has a description
    that is shown to the model, so wording it well teaches the model what
    belongs there ("Food: restaurants, takeaway, Swiggy and Zomato").
-7. **Amazon orders.** Each sync also reads order emails from
-   `auto-confirm@amazon.in` (change the senders in Settings) and keeps the
-   items, total and status (placed, shipped, delivered, cancelled) on
-   **Orders**. Every order is then matched to the Amazon charge in your bank
+7. **Amazon orders.** Each sync also reads Amazon order confirmations
+   (Gmail search `from:amazon subject:Ordered`; shipped, delivered, and
+   marketing mail is skipped) and keeps the items and total on **Orders**.
+   Every order is then matched to the Amazon charge in your bank
    alerts. The strongest signal is **timing**: your bank's alert and Amazon's
    order email reach your inbox within minutes of each other. A match shows
    the items on the transaction and pre-fills the narration, so one click
@@ -250,8 +250,8 @@ redirect URI.
    - cancelled orders never match, and a cancellation frees an earlier match;
    - anything else stays unmatched; you can **link** or **unlink** by hand.
 
-   When an email has no total line, the total is estimated from the item
-   prices (shown as "≈", and replaced if a later email states the real one).
+   When an email has no total line, the total is each item's price times its
+   quantity (shown as "≈", and replaced if a later email states the real one).
    **view email** on such an order shows what was stored, in case the layout
    needs a parser tweak. The window is `amazon_match_minutes` (default 30) and
    the amount slack is `amazon_amount_slack` in rupees (default 150), both under

@@ -75,9 +75,20 @@ class FakeGmail:
         if not self.connected:
             raise NotConnected("Google is not connected")
         self.queries.append(query)
-        wanted = re.search(r"from:\(([^)]*)\)", query)  # like Gmail, only mail from those senders
-        senders = {a.strip().lower() for a in wanted.group(1).split(" OR ")} if wanted else None
-        found = [m for m in self.messages.values() if senders is None or m.sender in senders]
+        found = list(self.messages.values())
+        grouped = re.search(r"from:\(([^)]*)\)", query)  # from:(a OR b): those senders exactly
+        if grouped:
+            senders = {a.strip().lower() for a in grouped.group(1).split(" OR ")}
+            found = [m for m in found if m.sender.lower() in senders]
+        else:
+            bare = re.search(r"from:(\S+)", query)  # from:amazon: the word appears in the address
+            if bare:
+                needle = bare.group(1).lower()
+                found = [m for m in found if needle in m.sender.lower()]
+        subject = re.search(r"subject:(\S+)", query)
+        if subject:
+            word = subject.group(1).lower()
+            found = [m for m in found if word in m.subject.lower()]
         return [m.id for m in sorted(found, key=lambda m: m.received_at, reverse=True)]
 
     def get_message(self, mid: str) -> GmailMessage:

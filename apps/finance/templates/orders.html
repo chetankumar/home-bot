@@ -10,7 +10,7 @@
   </div>
 </div>
 {% if msg %}{{ ui.flash(msg, "good") }}{% endif %}
-<p class="muted">Order emails from {{ senders | join(", ") }} are read on each sync, then matched to the Amazon charges in your bank alerts, mainly by timing (the two emails arrive minutes apart) and by amount. Items show on the matching transaction.</p>
+<p class="muted">Each sync reads Amazon mail matching <code>from:amazon subject:Ordered</code>, then matches those orders to the Amazon charges in your bank alerts, mainly by timing (the two emails arrive minutes apart) and by amount. Items show on the matching transaction.</p>
 
 {% call ui.stats() %}
   {{ ui.stat_card("Orders", n_orders) }}

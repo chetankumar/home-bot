@@ -68,7 +68,7 @@ class Order:
     at: datetime  # when the order email arrived
     total: int | None
     prices: list[int | None] = field(default_factory=list)
-    estimated: bool = False  # the total is the sum of item prices, not stated by the email
+    estimated: bool = False  # the total is unit price × quantity, not stated by the email
 
     @property
     def item_sum(self) -> int | None:
@@ -110,8 +110,9 @@ def _load_orders(conn: sqlite3.Connection) -> dict[int, Order]:
         " ORDER BY o.ordered_at, o.id"
     ).fetchall()
     prices: dict[int, list[int | None]] = {}
-    for i in conn.execute("SELECT order_id, price_paise FROM order_items ORDER BY id"):
-        prices.setdefault(i["order_id"], []).append(i["price_paise"])
+    for i in conn.execute("SELECT order_id, price_paise, quantity FROM order_items ORDER BY id"):
+        line = None if i["price_paise"] is None else i["price_paise"] * i["quantity"]
+        prices.setdefault(i["order_id"], []).append(line)
     return {
         r["id"]: Order(
             r["id"], datetime.fromisoformat(r["ordered_at"]), r["total_paise"], prices.get(r["id"], []),

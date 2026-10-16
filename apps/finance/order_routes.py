@@ -87,7 +87,6 @@ def build_order_router(ctx: AppContext) -> APIRouter:
             unparsed=unparsed,
             email_counts=email_counts,
             sync=sync_context(),
-            senders=orders.senders(ctx),
         )
 
     @router.post("/orders/match")

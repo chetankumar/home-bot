@@ -17,12 +17,14 @@ from . import amazon, learn, matching
 from .sync import backfill_start, local_iso
 
 JOB_ID = "orders"
-DEFAULT_SENDERS = ["auto-confirm@amazon.in"]
 DEFAULT_BACKFILL_DAYS = 90
+# Confirmations only. Shipped, delivered, cancelled, and marketing mail stays in
+# the inbox so it is never stored as a half-read order.
+GMAIL_FILTER = "from:amazon subject:Ordered"
 
 
-def senders(ctx: AppContext) -> list[str]:
-    return ctx.kv.get("amazon_senders") or list(DEFAULT_SENDERS)
+def gmail_query(since: datetime) -> str:
+    return f"{GMAIL_FILTER} after:{int(since.timestamp())}"
 
 
 def since(ctx: AppContext, conn: sqlite3.Connection, now: datetime) -> datetime:
@@ -66,7 +68,7 @@ def upsert_order(conn: sqlite3.Connection, parsed: amazon.ParsedOrder, received_
             "INSERT INTO order_items(order_id, title, quantity, price_paise) VALUES (?, ?, ?, ?)",
             [(oid, i.title, i.quantity, i.price_paise) for i in parsed.items],
         )
-    # No total anywhere? Estimate it from the item prices so amount matching can use it.
+    # No total anywhere? Estimate it as unit price × quantity so amount matching can use it.
     row = conn.execute("SELECT total_paise FROM orders WHERE id = ?", (oid,)).fetchone()
     if row["total_paise"] is None:
         stored = [
@@ -171,7 +173,7 @@ def _scan(ctx: AppContext, now: datetime) -> dict[str, int]:
     stats = {"fetched": 0, "new": 0, "parsed": 0, "ignored": 0, "unparsed": 0, "matched": 0}
     with ctx.db() as conn:
         start = since(ctx, conn, now)
-    ids = ctx.gmail.search(f"from:({' OR '.join(senders(ctx))}) after:{int(start.timestamp())}")
+    ids = ctx.gmail.search(gmail_query(start))
     stats["fetched"] = len(ids)
     with ctx.db() as conn:
         known = {r[0] for r in conn.execute("SELECT gmail_id FROM order_emails")}

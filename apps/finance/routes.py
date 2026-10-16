@@ -338,7 +338,7 @@ def build_router(ctx: AppContext) -> APIRouter:
             "settings.html",
             budget=budget(),
             senders=senders(ctx),
-            amazon_senders=orders_mod.senders(ctx),
+            amazon_filter=orders_mod.GMAIL_FILTER,
             hint=hint,
             saved=saved,
             connected=ctx.gmail.connected,
@@ -366,7 +366,7 @@ def build_router(ctx: AppContext) -> APIRouter:
 
     @router.post("/settings")
     def save_settings(
-        budget_rupees: str = Form(""), sender_list: str = Form(""), amazon_sender_list: str = Form("")
+        budget_rupees: str = Form(""), sender_list: str = Form("")
     ):
         if budget_rupees.strip():
             try:
@@ -378,9 +378,6 @@ def build_router(ctx: AppContext) -> APIRouter:
         addrs = [s.strip().lower() for s in sender_list.replace(",", "\n").splitlines() if s.strip()]
         if addrs:
             ctx.kv.set("senders", addrs)
-        amazon = [s.strip().lower() for s in amazon_sender_list.replace(",", "\n").splitlines() if s.strip()]
-        if amazon:
-            ctx.kv.set("amazon_senders", amazon)
         return back("/settings?saved=1")
 
     return router

@@ -85,6 +85,9 @@ For each stored email (`sync._process_email`):
 
 ## Amazon orders
 
+The scan asks Gmail for `from:amazon subject:Ordered` (plus the date window).
+Shipped, delivered, cancelled, and marketing mail is not fetched.
+
 For each order email (`orders._process_email`, `amazon.parse_email`):
 
 - **Order number** (`123-1234567-1234567`): fixed pattern in code. No order
@@ -100,8 +103,8 @@ For each order email (`orders._process_email`, `amazon.parse_email`):
   matched on the body line by line). If that finds none, the item is taken
   from the subject line.
 - **Status** comes from the subject and the start of the body.
-- No total anywhere but every item has a single-quantity price? The total is
-  estimated from the prices (shown as "estimated").
+- No total anywhere but every item has a price? The total is each item's
+  price times its quantity (shown as "estimated").
 
 An order is **weak** if its items came only from the subject, or its total is
 missing, and it is a fresh "placed" order. Weak orders and unreadable ones are

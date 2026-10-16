@@ -170,8 +170,8 @@ def test_sync_first_run_looks_back_90_days_then_a_day_before_the_newest(fin):  #
     add_amazon(fin, "a1", "ordered_single_rs.txt", at(2, 9))
     fin.sync.run_sync(fin.ctx, now=at(3))
     fin.sync.run_sync(fin.ctx, now=at(4))
-    amazon_q = [q for q in fin.gmail.queries if SENDER in q]
-    assert "after:" in amazon_q[0] and amazon_q[0].startswith(f"from:({SENDER})")
+    amazon_q = [q for q in fin.gmail.queries if "subject:Ordered" in q]
+    assert "after:" in amazon_q[0] and amazon_q[0].startswith("from:amazon subject:Ordered")
     import re
     from datetime import datetime
     from zoneinfo import ZoneInfo
@@ -182,18 +182,20 @@ def test_sync_first_run_looks_back_90_days_then_a_day_before_the_newest(fin):  #
     assert second == int(datetime(2026, 10, 1, 9, tzinfo=ist).timestamp())
 
 
-def test_sync_is_idempotent_and_later_emails_update_the_order(fin):  # noqa: F811
+def test_sync_is_idempotent_and_skips_mail_that_is_not_an_order_confirmation(fin):  # noqa: F811
     add_amazon(fin, "a1", "ordered_two_items.txt", at(1, 9))
     fin.sync.run_sync(fin.ctx, now=at(2))
     assert fin.sync.run_sync(fin.ctx, now=at(2))["orders"]["new"] == 0
     assert count(fin.ctx, "SELECT COUNT(*) FROM orders") == 1
 
-    add_amazon(fin, "a2", "shipped.txt", at(2, 10))  # names one item only
+    add_amazon(fin, "a2", "shipped.txt", at(2, 10))
     add_amazon(fin, "a3", "delivered.txt", at(4, 10))
+    add_amazon(fin, "a4", "marketing.txt", at(4, 11))
     fin.sync.run_sync(fin.ctx, now=at(5))
     o = rows(fin, "SELECT * FROM orders")[0]
-    assert (o["status"], o["ordered_at"]) == ("delivered", "2026-10-01T09:00:00")
-    assert count(fin.ctx, "SELECT COUNT(*) FROM order_items") == 2  # the fuller list survived
+    assert (o["status"], o["ordered_at"]) == ("placed", "2026-10-01T09:00:00")
+    assert count(fin.ctx, "SELECT COUNT(*) FROM order_emails") == 1
+    assert count(fin.ctx, "SELECT COUNT(*) FROM order_items") == 2
 
 
 def test_cancellation_releases_the_payment(fin):  # noqa: F811
@@ -202,7 +204,17 @@ def test_cancellation_releases_the_payment(fin):  # noqa: F811
     fin.sync.run_sync(fin.ctx, now=at(3))
     assert rows(fin, "SELECT order_id FROM transactions")[0]["order_id"] is not None
     add_amazon(fin, "a2", "cancelled.txt", at(3, 10))
-    fin.sync.run_sync(fin.ctx, now=at(4))
+    fin.sync.run_sync(fin.ctx, now=at(4))  # subject is not "Ordered", so the scan leaves it
+    assert rows(fin, "SELECT order_id FROM transactions")[0]["order_id"] is not None
+    assert rows(fin, "SELECT status FROM orders")[0]["status"] == "placed"
+    subject, body = amz("cancelled.txt")
+    with fin.ctx.db() as conn:
+        conn.execute(
+            "INSERT INTO order_emails(gmail_id, received_at, sender, subject, body, status)"
+            " VALUES ('a2', '2026-10-03T10:00:00', ?, ?, ?, 'unparsed')",
+            (SENDER, subject, body),
+        )
+        orders_mod.process_email(fin.ctx, conn, "a2", use_ai=False)
     assert rows(fin, "SELECT order_id FROM transactions")[0]["order_id"] is None
     assert rows(fin, "SELECT status FROM orders")[0]["status"] == "cancelled"
 
@@ -220,7 +232,7 @@ def test_amazon_failure_never_fails_the_bank_sync(fin):  # noqa: F811
     real = fin.gmail.search
 
     def search(query, limit=2000):
-        if SENDER in query:
+        if "subject:Ordered" in query:
             raise RuntimeError("amazon boom")
         return real(query, limit)
 
@@ -269,9 +281,11 @@ def test_unreadable_email_waits_for_review_then_reparse_recovers_it(fin):  # noq
     assert rows(fin, "SELECT order_number FROM orders") == [{"order_number": "171-0000000-1111111"}]
 
 
-def test_non_order_amazon_mail_is_ignored_without_the_model(fin):  # noqa: F811
+def test_marketing_mail_is_not_fetched(fin):  # noqa: F811
     add_amazon(fin, "a1", "marketing.txt", at(1, 9))
-    assert fin.sync.run_sync(fin.ctx, now=at(2))["orders"]["ignored"] == 1
+    assert fin.sync.run_sync(fin.ctx, now=at(2))["orders"] == {
+        "fetched": 0, "new": 0, "parsed": 0, "ignored": 0, "unparsed": 0, "matched": 0}
+    assert count(fin.ctx, "SELECT COUNT(*) FROM order_emails") == 0
     assert fin.ollama.calls == []
 
 
@@ -330,14 +344,14 @@ def test_summary_truncates(fin):  # noqa: F811
         from apps.finance.queries import order_summary
         s = order_summary(conn, oid)
     assert s == "A" * 59 + "…, B, C +2 more"
-    assert txn_rows is not None and orders_mod.DEFAULT_SENDERS == [SENDER]
+    assert txn_rows is not None and orders_mod.GMAIL_FILTER == "from:amazon subject:Ordered"
 
 
-def test_settings_edit_amazon_senders(fin):  # noqa: F811
+def test_settings_page_shows_the_amazon_filter(fin):  # noqa: F811
     client = login(TestClient(fin.app))
-    client.post(f"{BASE}/settings", data={"budget_rupees": "", "sender_list": "a@b.com", "amazon_sender_list": "auto-confirm@amazon.in\norder-update@amazon.in"})
-    assert fin.ctx.kv.get("amazon_senders") == ["auto-confirm@amazon.in", "order-update@amazon.in"]
-    assert "order-update@amazon.in" in client.get(f"{BASE}/settings").text
+    assert "from:amazon subject:Ordered" in client.get(f"{BASE}/settings").text
+    client.post(f"{BASE}/settings", data={"budget_rupees": "", "sender_list": "a@b.com"})
+    assert fin.ctx.kv.get("senders") == ["a@b.com"]
 
 
 # -- migration ------------------------------------------------------------------------------------------------------

@@ -1,4 +1,4 @@
-"""Parse Amazon.in order emails (auto-confirm@amazon.in) into orders and items.
+"""Parse Amazon.in order-confirmation emails into orders and items.
 
 Amazon's layout changes, and I have no sample of yours, so parsing is layered:
 regexes for the common plain-text layout, then the subject line, then the local
@@ -162,14 +162,14 @@ def amazon_items(rule: AmazonRule, body: str) -> list[OrderItem]:
 
 
 def estimate_total(items: list[OrderItem]) -> int | None:
-    """Sum of item prices, when every item has one and each is a single unit.
+    """Sum of unit price times quantity, when every item has a price.
 
-    For quantity > 1 it is unclear whether the price is per unit or for the line, so no
-    estimate is made (timing can still match the order).
+    The amount next to a line is the price of one unit. An email that states its own
+    total is used instead of this estimate.
     """
-    if not items or any(i.price_paise is None or i.quantity != 1 for i in items):
+    if not items or any(i.price_paise is None for i in items):
         return None
-    return sum(i.price_paise for i in items)
+    return sum(i.price_paise * i.quantity for i in items if i.price_paise is not None)
 
 
 def parse_email(subject: str, body: str, rules: Sequence[AmazonRule] | None = None) -> ParsedOrder | str | None:

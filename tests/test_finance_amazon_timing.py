@@ -136,7 +136,7 @@ def test_an_ambiguous_clock_is_left_for_you_not_guessed(fin):  # noqa: F811
 
 
 def test_shipments_matching_item_prices(fin):  # noqa: F811
-    o = order(fin, "A", T0, items=[(100, 1), (200, 2), (300, 1)])  # qty 2: no estimated total
+    o = order(fin, "A", T0, items=[(100, 1), (100, 2), (300, 1)])  # lines are 100, 200, 300
     a = bank_alert(fin, T0 + timedelta(days=1), 300, mid="s1")
     b = bank_alert(fin, T0 + timedelta(days=2), 300, mid="s2")
     assert run(fin).split == 1
@@ -163,11 +163,25 @@ def test_missing_total_is_estimated_from_item_prices_when_stored(fin):  # noqa: 
     assert (o["total_paise"], o["total_source"]) == (18900, "items")
 
 
-def test_estimate_skips_quantities_and_missing_prices():
+def test_estimate_is_unit_price_times_quantity():
     est = amazon.estimate_total
     assert est([amazon.OrderItem("a", 1, 100), amazon.OrderItem("b", 1, 250)]) == 350
-    assert est([amazon.OrderItem("a", 2, 100)]) is None  # per unit or per line? unknown
+    assert est([amazon.OrderItem("a", 2, 100)]) == 200
+    assert est([amazon.OrderItem("a", 3, 18900), amazon.OrderItem("b", 1, 5000)]) == 61700
     assert est([amazon.OrderItem("a", 1, None)]) is None and est([]) is None
+
+
+def test_missing_total_multiplies_price_by_quantity_when_stored(fin):  # noqa: F811
+    from apps.finance import orders as orders_mod
+
+    parsed = amazon.ParsedOrder(
+        "408-0000001-0000001",
+        items=[amazon.OrderItem("Wipes", 2, 18900), amazon.OrderItem("Soap", 1, 5000)],
+    )
+    with fin.ctx.db() as conn:
+        oid = orders_mod.upsert_order(conn, parsed, "2026-09-03T10:00:00")
+        o = dict(conn.execute("SELECT * FROM orders WHERE id = ?", (oid,)).fetchone())
+    assert (o["total_paise"], o["total_source"]) == (42800, "items")
 
 
 def test_a_real_total_replaces_an_estimate_but_never_the_reverse(fin):  # noqa: F811
@@ -251,7 +265,7 @@ def test_backfill_reaches_back_once_then_returns_to_normal(fin):  # noqa: F811
     queries = fin.gmail.queries
     epoch = int(datetime(2020, 1, 1, tzinfo=IST).timestamp())
     assert any(f"after:{epoch}" in q and "hdfcbank" in q for q in queries)   # bank alerts
-    assert any(f"after:{epoch}" in q and SENDER in q for q in queries)       # and Amazon orders
+    assert any(f"after:{epoch}" in q and "subject:Ordered" in q for q in queries)  # and Amazon orders
     assert fin.ctx.kv.get("backfill_from") is None                           # one-shot
     assert count(fin.ctx, "SELECT COUNT(*) FROM emails WHERE gmail_id = 'old'") == 1
     n_before = len(queries)
@@ -311,3 +325,44 @@ def test_migration_004_backfills_estimates_for_orders_already_stored(tmp_path):
     assert got == {"known": (50000, "email"), "estimate": (19900, "items"), "multi": (None, None),
                    "noprice": (None, None), "noitems": (None, None)}
     assert re.search(r"order_match_note", (src / "004_order_totals_and_match_notes.sql").read_text(encoding="utf-8"))
+
+
+def test_migration_008_fills_totals_from_price_times_quantity(tmp_path):
+    from hub.services.db import Database
+    from tests.conftest import ROOT
+
+    src = ROOT / "apps" / "finance" / "migrations"
+    mig = tmp_path / "m"
+    mig.mkdir()
+    for name in (
+        "001_init.sql", "002_dynamic_categories.sql", "003_amazon_orders.sql",
+        "004_order_totals_and_match_notes.sql", "005_learned_parsers.sql",
+        "006_rule_scorecard.sql", "007_regex_negotiations.sql",
+    ):
+        (mig / name).write_text((src / name).read_text(encoding="utf-8"), encoding="utf-8")
+    db = Database(tmp_path / "f.db", mig)
+    with db() as conn:
+        def add(number, total, items):
+            oid = conn.execute(
+                "INSERT INTO orders(order_number, ordered_at, total_paise, total_source)"
+                " VALUES (?, '2026-09-03T10:00:00', ?, ?)",
+                (number, total, "email" if total is not None else None),
+            ).lastrowid
+            for price, qty in items:
+                conn.execute(
+                    "INSERT INTO order_items(order_id, title, quantity, price_paise) VALUES (?, 'x', ?, ?)",
+                    (oid, qty, price),
+                )
+        add("known", 50000, [(10000, 3)])          # already has a total: left alone
+        add("multi", None, [(18900, 2), (5000, 1)])
+        add("noprice", None, [(None, 2)])
+        add("noitems", None, [])
+    (mig / "008_order_total_quantity.sql").write_text(
+        (src / "008_order_total_quantity.sql").read_text(encoding="utf-8"), encoding="utf-8")
+    assert Database(tmp_path / "f.db", mig).applied == ["008_order_total_quantity.sql"]
+    with db() as conn:
+        got = {r["order_number"]: (r["total_paise"], r["total_source"]) for r in conn.execute("SELECT * FROM orders")}
+    assert got == {
+        "known": (50000, "email"), "multi": (42800, "items"),
+        "noprice": (None, None), "noitems": (None, None),
+    }
